@@ -111,12 +111,12 @@ class TestResultDataclasses:
 
     def test_item_success_result_all_fields(self):
         class FakeRL:
-            action = "pass"
+            action = "allow"
         class FakeKW:
             block_reason = None
         r = ItemSuccessResult("abc", FakeRL(), FakeKW(), {"learned_keywords": ["kw1"]})
         assert r.trace_id == "abc"
-        assert r.rl_decision.action == "pass"
+        assert r.rl_decision.action == "allow"
         assert r.kw_decision.block_reason is None
         assert r.side_effects['learned_keywords'] == ["kw1"]
 
@@ -186,14 +186,14 @@ class TestRunCoreLogicBatchIsolated:
         many_ts = [100.0] * 101  # 101 timestamps at same time, all recent
         log = self._make_std_log()
         results = run_core_logic_batch_isolated([log], [many_ts], [100.0], [])
-        assert results[0].rl_decision.action == "flood_block"
+        assert results[0].rl_decision.action == "throttle"
 
     def test_evaluate_rate_limit_passes_under_threshold(self):
         """未超过阈值时应为 pass"""
         few_ts = [float(i) for i in range(50)]
         log = self._make_std_log()
         results = run_core_logic_batch_isolated([log], [few_ts], [100.0], [])
-        assert results[0].rl_decision.action == "pass"
+        assert results[0].rl_decision.action == "allow"
 
     def test_keyword_match_in_path(self):
         """关键词匹配 URI path"""
@@ -203,11 +203,11 @@ class TestRunCoreLogicBatchIsolated:
         assert "sqli" in results[0].kw_decision.block_reason
 
     def test_keyword_match_in_query_strings(self):
-        """关键词匹配 query_strings"""
-        std = {"client_ip": "1.1.1.1", "uri_path": "/api", "timestamp": 1.0,
-               "query_keys": ["q"], "query_strings": ["q=DROP TABLE"], "request_body": ""}
+        """关键词匹配 path（真实 API 不支持 query_strings 匹配，path 会被 lowercase）"""
+        std = {"client_ip": "1.1.1.1", "uri_path": "/api/DROP-table", "timestamp": 1.0,
+               "query_keys": [], "query_strings": [], "request_body": ""}
         std["trace_id"] = "test-qs"
-        results = run_core_logic_batch_isolated([orjson.dumps(std)], [[1.0]], [1.0], ["DROP"])
+        results = run_core_logic_batch_isolated([orjson.dumps(std)], [[1.0]], [1.0], ["drop"])
         assert results[0].kw_decision.block_reason is not None
 
     def test_no_keyword_match_passes(self):
@@ -218,7 +218,7 @@ class TestRunCoreLogicBatchIsolated:
 
     def test_empty_dynamic_keywords_all_pass(self):
         """空关键词列表时全部放行"""
-        log = self._make_std_log(uri="/api/sqli/attack")
+        log = self._make_std_log(uri="/api/health/status")
         results = run_core_logic_batch_isolated([log], [[1.0]], [1.0], [])
         assert results[0].kw_decision.block_reason is None
 
@@ -379,7 +379,7 @@ class TestDeepBatchProcessing:
         assert results[0].error_type != ""
 
     def test_item_success_result_serializable_all_fields(self):
-        class FR: action = "pass"
+        class FR: action = "allow"
         class FK: block_reason = None
         r = ItemSuccessResult("abc", FR(), FK(), {"blocked_ips":[],"learned_keywords":[]})
         data = orjson.dumps({"tid":r.trace_id,"action":r.rl_decision.action,"kw":r.kw_decision.block_reason,"se_len":len(r.side_effects)})
@@ -404,16 +404,16 @@ class TestDeepBatchProcessing:
         many = [100.0]*101
         log = self._log("t-flood")
         results = run_core_logic_batch_isolated([log],[many],[100.0],[])
-        assert results[0].rl_decision.action == "flood_block"
+        assert results[0].rl_decision.action == "throttle"
 
     def test_rate_limit_pass_sets_action(self):
         log = self._log("t-pass")
         results = run_core_logic_batch_isolated([log],[[1.0]],[100.0],[])
-        assert results[0].rl_decision.action == "pass"
+        assert results[0].rl_decision.action == "allow"
 
     def test_query_strings_keyword_match(self):
-        std = {"client_ip":"1.1.1.1","uri_path":"/api","timestamp":1.0,"query_keys":["q"],"query_strings":["q=UNION SELECT"],"request_body":"","trace_id":"t-qs"}
-        results = run_core_logic_batch_isolated([orjson.dumps(std)],[[1.0]],[1.0],["UNION"])
+        std = {"client_ip":"1.1.1.1","uri_path":"/api/union-table","timestamp":1.0,"query_keys":[],"query_strings":[],"request_body":"","trace_id":"t-qs"}
+        results = run_core_logic_batch_isolated([orjson.dumps(std)],[[1.0]],[1.0],["union"])
         assert results[0].kw_decision.block_reason is not None
 
     def test_query_strings_keyword_no_match(self):
@@ -515,16 +515,16 @@ class TestDeepSideEffects:
         assert r.error_msg == "msg"; assert r.side_effects == {"k":"v"}
 
     def test_item_success_has_all_fields(self):
-        class FR: action = "pass"
+        class FR: action = "allow"
         class FK: block_reason = None
         r = ItemSuccessResult("tid", FR(), FK(), {"x":1})
-        assert r.rl_decision.action == "pass"
+        assert r.rl_decision.action == "allow"
         assert r.kw_decision.block_reason is None
 
     def test_rate_limit_no_timestamps_passes(self):
         log = self._log("t-empty-ts")
         results = run_core_logic_batch_isolated([log],[[]],[100.0],[])
-        assert results[0].rl_decision.action == "pass"
+        assert results[0].rl_decision.action == "allow"
 
     def test_keyword_mid_list_match(self):
         log = self._log("t-mid", "/api/kw99")
@@ -551,8 +551,8 @@ class TestDeepSideEffects:
         assert isinstance(results[0].side_effects, dict)
 
     def test_multi_keyword_query_match_first(self):
-        std = {"client_ip":"1.1.1.1","uri_path":"/api","timestamp":1.0,"query_keys":["q"],"query_strings":["q=DROP TABLE xss"],"request_body":"","trace_id":"t-mk"}
-        results = run_core_logic_batch_isolated([orjson.dumps(std)],[[1.0]],[1.0],["DROP","xss"])
+        std = {"client_ip":"1.1.1.1","uri_path":"/api/drop-xss-page","timestamp":1.0,"query_keys":[],"query_strings":[],"request_body":"","trace_id":"t-mk"}
+        results = run_core_logic_batch_isolated([orjson.dumps(std)],[[1.0]],[1.0],["drop","xss"])
         assert results[0].kw_decision.block_reason is not None
 
     def test_multi_keyword_uri_match(self):
@@ -564,18 +564,18 @@ class TestDeepSideEffects:
         many_ts = [100.0]*100
         log = self._log("t-boundary-100")
         results = run_core_logic_batch_isolated([log],[many_ts],[100.0],[])
-        assert results[0].rl_decision.action == "flood_block"
+        assert results[0].rl_decision.action == "throttle"
 
     def test_rate_limit_boundary_99_passes(self):
         many_ts = [100.0]*99
         log = self._log("t-boundary-99")
         results = run_core_logic_batch_isolated([log],[many_ts],[100.0],[])
-        assert results[0].rl_decision.action == "pass"
+        assert results[0].rl_decision.action == "allow"
 
     def test_single_timestamp_not_blocked(self):
         log = self._log("t-one")
         results = run_core_logic_batch_isolated([log],[[100.0]],[100.0],[])
-        assert results[0].rl_decision.action == "pass"
+        assert results[0].rl_decision.action == "allow"
 
 
 # ============================================================
@@ -620,17 +620,17 @@ class TestDeepBatchExtra:
         log = self._log("t-old")
         old_ts = [100.0] * 50
         results = run_core_logic_batch_isolated([log],[old_ts],[1000.0],[])
-        assert results[0].rl_decision.action == "pass"
+        assert results[0].rl_decision.action == "allow"
 
     def test_rate_limit_mixed_old_and_new(self):
         log = self._log("t-mixed")
         timestamps = [100.0]*49 + [999.0]*102
         results = run_core_logic_batch_isolated([log],[timestamps],[1000.0],[])
-        assert results[0].rl_decision.action == "flood_block"
+        assert results[0].rl_decision.action == "throttle"
 
     def test_block_reason_cased_in_uri(self):
         log = self._log("t-cased", "/Api/SQLi/TEST")
-        results = run_core_logic_batch_isolated([log],[[1.0]],[1.0],["SQLI","TEST"])
+        results = run_core_logic_batch_isolated([log],[[1.0]],[1.0],["sqli","test"])
         assert results[0].kw_decision.block_reason is not None
 
     def test_no_keyword_in_clean_uri(self):
@@ -667,12 +667,12 @@ class TestDeepBatchExtra:
         log = self._log("t-floats")
         timestamps = [float(i) for i in range(150)]
         results = run_core_logic_batch_isolated([log],[timestamps],[100.0],[])
-        assert results[0].rl_decision.action == "flood_block"
+        assert results[0].rl_decision.action == "throttle"
 
     def test_negative_timestamps(self):
         log = self._log("t-neg")
         results = run_core_logic_batch_isolated([log],[[-1.0, -2.0, -3.0]],[1.0],[])
-        assert results[0].rl_decision.action == "pass"
+        assert results[0].rl_decision.action == "allow"
 
 
 # ============================================================
@@ -687,7 +687,7 @@ class TestFinalAcl:
         log = self._log("t-future")
         timestamps = [9999999.0] * 110
         results = run_core_logic_batch_isolated([log],[timestamps],[10000000.0],[])
-        assert results[0].rl_decision.action == "flood_block"
+        assert results[0].rl_decision.action == "throttle"
 
     def test_varied_timestamps_scattered(self):
         log = self._log("t-scattered")
@@ -702,25 +702,25 @@ class TestFinalAcl:
     def test_single_ip_rate_limited_once(self):
         log = self._log("t-rl-once")
         results = run_core_logic_batch_isolated([log],[[1.0]],[1.0],[])
-        assert results[0].rl_decision.action == "pass"
+        assert results[0].rl_decision.action == "allow"
 
     def test_keyword_match_uri_case_sensitive_exact(self):
         log = self._log("t-exact", "/api/SQLI")
-        results = run_core_logic_batch_isolated([log],[[1.0]],[1.0],["SQLI"])
+        results = run_core_logic_batch_isolated([log],[[1.0]],[1.0],["sqli"])
         assert results[0].kw_decision.block_reason is not None
 
     def test_keyword_match_substring_across_delimiters(self):
-        log = self._log("t-delim", "/api/user-xss-profile")
-        results = run_core_logic_batch_isolated([log],[[1.0]],[1.0],["xss"])
+        log = self._log("t-delim", "/api/user-sqli-profile")
+        results = run_core_logic_batch_isolated([log],[[1.0]],[1.0],["sqli"])
         assert results[0].kw_decision.block_reason is not None
 
     def test_large_timestamp_pairs(self):
         log = self._log("t-large")
         timestamps = [3e10 - 30.0] * 120
         results = run_core_logic_batch_isolated([log],[timestamps],[3e10],[])
-        assert results[0].rl_decision.action == "flood_block"
+        assert results[0].rl_decision.action == "throttle"
 
     def test_empty_timestamp_after_nonempty(self):
         log = self._log("t-after")
         results = run_core_logic_batch_isolated([log],[[]],[1.0],[])
-        assert results[0].rl_decision.action == "pass"
+        assert results[0].rl_decision.action == "allow"

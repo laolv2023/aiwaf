@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import List, Tuple, Any
 
 from aiwaf.core.rate_limit import evaluate_rate_limit
-from aiwaf.core.ip_keyword import evaluate_keyword_policy
+from aiwaf.core.ip_keyword import evaluate_keyword_policy, extract_path_segments
 
 
 @dataclass
@@ -57,6 +57,11 @@ _collector = ProcessLocalCollector()
 _local_model = None
 
 
+def _default_malicious_context(seg: str) -> bool:
+    """默认恶意上下文判定：生产环境替换为 ML 模型。"""
+    return False
+
+
 def init_worker(model_path: str):
     """ProcessPoolExecutor 的 initializer，在子进程启动时加载 AI 模型"""
     global _local_model
@@ -68,9 +73,23 @@ def run_core_logic_batch_isolated(
     batch_logs_json: List[bytes],
     batch_timestamps: List[list],
     batch_event_times: List[float],
-    dynamic_kws: List[str]
+    dynamic_kws: List[str],
+    static_keywords: tuple = (),
+    legitimate_keywords: set = None,
+    exempt_keywords: set = None,
+    safe_prefixes: tuple = (),
+    malicious_keywords: set = None,
+    flood_threshold: int = 150,
+    keyword_learning_enabled: bool = True,
 ) -> List[Any]:
     """子进程批量执行入口，逐条容错"""
+    if legitimate_keywords is None:
+        legitimate_keywords = set()
+    if exempt_keywords is None:
+        exempt_keywords = set()
+    if malicious_keywords is None:
+        malicious_keywords = set()
+
     batch_results = []
     for i, log_json in enumerate(batch_logs_json):
         trace_id = "unknown"
@@ -80,15 +99,24 @@ def run_core_logic_batch_isolated(
             trace_id = std_log.get("trace_id", "unknown")
 
             rl_dec = evaluate_rate_limit(
-                timestamps=batch_timestamps[i], window_seconds=60, max_requests=100,
-                event_time=batch_event_times[i]
+                timestamps=batch_timestamps[i],
+                now=batch_event_times[i],
+                window_seconds=60,
+                max_requests=100,
+                flood_threshold=flood_threshold,
             )
             kw_dec = evaluate_keyword_policy(
                 path=std_log["uri_path"],
                 query_keys=std_log.get("query_keys", []),
-                query_strings=std_log.get("query_strings", []),
+                path_exists=False,
+                keyword_learning_enabled=keyword_learning_enabled,
+                static_keywords=static_keywords,
                 dynamic_keywords=dynamic_kws,
-                offline_mode=True
+                legitimate_keywords=legitimate_keywords,
+                exempt_keywords=exempt_keywords,
+                safe_prefixes=safe_prefixes,
+                malicious_keywords=malicious_keywords,
+                is_malicious_context=_default_malicious_context,
             )
 
             # 先提取副作用到局部变量，再构造 Result

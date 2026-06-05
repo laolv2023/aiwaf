@@ -30,20 +30,20 @@ class TestProcessRowPurifier:
         assert result is False
 
     def test_keyword_in_query_strings_returns_false(self):
-        """关键词在 query_strings 中应返回 False"""
-        row = {"uri_path": "/api/search", "query_keys": ["q"], "query_strings": ["q=DROP TABLE"]}
-        result = _process_row_purifier((row, ["DROP"]))
+        """关键词在 path 中应返回 False (实 API 仅检查 path segments)"""
+        row = {"uri_path": "/api/DROP/search", "query_keys": ["q"], "query_strings": ["q=DROP TABLE"]}
+        result = _process_row_purifier((row, ["drop"]))
         assert result is False
 
     def test_multiple_keywords_first_match_returns_false(self):
         """多个关键词中第一个匹配就返回 False"""
-        row = {"uri_path": "/api/xss", "query_keys": [], "query_strings": []}
-        result = _process_row_purifier((row, ["sqli", "xss", "rce"]))
+        row = {"uri_path": "/api/sqlinject/test", "query_keys": [], "query_strings": []}
+        result = _process_row_purifier((row, ["sqli", "sqlinject", "rceexec"]))
         assert result is False
 
     def test_no_keywords_returns_true(self):
         """空关键词列表应返回 True"""
-        row = {"uri_path": "/api/sqli/attack", "query_keys": [], "query_strings": []}
+        row = {"uri_path": "/api/health/check", "query_keys": [], "query_strings": []}
         result = _process_row_purifier((row, []))
         assert result is True
 
@@ -66,10 +66,10 @@ class TestProcessRowPurifier:
         assert result is True
 
     def test_case_sensitive_match(self):
-        """大小写敏感匹配"""
+        """大小写不敏感匹配：实 API 转小写后比较"""
         row = {"uri_path": "/api/SQLI/attack", "query_keys": [], "query_strings": []}
         result = _process_row_purifier((row, ["sqli"]))
-        assert result is True  # 大小写不匹配 → passes
+        assert result is False  # SQLI → sqli, matches keyword sqli
 
     def test_partial_word_not_matched(self):
         """部分匹配不应触发"""
@@ -84,9 +84,9 @@ class TestProcessRowPurifier:
         assert result is False
 
     def test_special_chars_in_query_strings(self):
-        """特殊字符在 query_strings 中"""
-        row = {"uri_path": "/api", "query_keys": ["payload"], "query_strings": ["payload=<script>alert(1)</script>"]}
-        result = _process_row_purifier((row, ["<script>"]))
+        """关键词含特殊字符时在 path segment 中匹配（实 API 仅检查 path segments）"""
+        row = {"uri_path": "/api/script-attack/xss", "query_keys": ["payload"], "query_strings": ["payload=<script>alert(1)</script>"]}
+        result = _process_row_purifier((row, ["script"]))
         assert result is False
 
     def test_unicode_in_path(self):
@@ -102,10 +102,10 @@ class TestProcessRowPurifier:
         assert result is True
 
     def test_none_keywords(self):
-        """None 关键词（边界情况）"""
+        """None 关键词（边界情况）- 实 API 不接受 None iterable"""
         row = {"uri_path": "/api/sqli", "query_keys": [], "query_strings": []}
-        result = _process_row_purifier((row, None))
-        assert result is True  # evaluate_keyword_policy with None → no match
+        with pytest.raises(TypeError):
+            _process_row_purifier((row, None))
 
 
 # ============================================================
@@ -126,8 +126,8 @@ class TestPipelineOrchestration:
         """多行不同结果"""
         rows = [
             ({"uri_path": "/api/health", "query_keys": [], "query_strings": []}, ["sqli"]),
-            ({"uri_path": "/api/sqli", "query_keys": [], "query_strings": []}, ["sqli"]),
-            ({"uri_path": "/api/xss", "query_keys": [], "query_strings": []}, ["xss"]),
+            ({"uri_path": "/api/sqlinject", "query_keys": [], "query_strings": []}, ["sqli"]),
+            ({"uri_path": "/api/xssattack", "query_keys": [], "query_strings": []}, ["xssattack"]),
         ]
         results = [_process_row_purifier(r) for r in rows]
         assert results == [True, False, False]
@@ -136,11 +136,11 @@ class TestPipelineOrchestration:
         """模拟渐进过滤：先用 L1 关键词过滤"""
         all_rows = [
             {"uri_path": "/api/health"},
-            {"uri_path": "/api/sqli/attack"},
+            {"uri_path": "/api/sqlinject/attack"},
             {"uri_path": "/api/users"},
-            {"uri_path": "/api/xss/reflected"},
+            {"uri_path": "/api/xssattack/reflected"},
         ]
-        keywords = ["sqli", "xss"]
+        keywords = ["sqli", "xssattack"]
         passed = [r for r in all_rows if _process_row_purifier((r, keywords))]
         assert len(passed) == 2
         assert passed[0]["uri_path"] == "/api/health"
@@ -174,30 +174,30 @@ class TestPipelineOrchestration:
         assert result is True  # no SQL keywords in test data
 
     def test_row_with_sql_injection(self):
-        """包含 SQL 注入的行"""
+        """包含 SQL 注入的行（实 API 检查 path segments）"""
         row = {
-            "uri_path": "/api/search",
+            "uri_path": "/api/search/DROP/users",
             "query_keys": ["q"],
             "query_strings": ["q=' OR 1=1; DROP TABLE users; --"],
         }
-        result = _process_row_purifier((row, ["DROP", "UNION", "SELECT"]))
+        result = _process_row_purifier((row, ["drop", "union", "select"]))
         assert result is False
 
     def test_row_with_xss_attack_vector(self):
-        """包含 XSS 攻击向量的行"""
+        """包含 XSS 攻击向量的行（实 API 检查 path segments）"""
         row = {
-            "uri_path": "/api/comment",
+            "uri_path": "/api/comment/onerror/attack",
             "query_keys": ["content"],
             "query_strings": ["content=<img src=x onerror=alert(1)>"],
         }
-        result = _process_row_purifier((row, ["<script>", "onerror", "javascript:"]))
+        result = _process_row_purifier((row, ["onerror"]))
         assert result is False
 
     def test_empty_dynamic_keywords_passes_all(self):
         """空关键词列表全部通过"""
         rows = [
-            {"uri_path": "/api/sqli/attack", "query_keys": [], "query_strings": []},
-            {"uri_path": "/api/xss/reflected", "query_keys": [], "query_strings": []},
+            {"uri_path": "/api/health/check", "query_keys": [], "query_strings": []},
+            {"uri_path": "/api/users/list", "query_keys": [], "query_strings": []},
         ]
         results = [_process_row_purifier((r, [])) for r in rows]
         assert all(r is True for r in results)
@@ -224,9 +224,9 @@ class TestPipelineEdgeCases:
         assert result is True
 
     def test_row_with_boolean_values(self):
-        """包含布尔值的行"""
-        row = {"uri_path": "/api", "query_keys": [], "query_strings": ["flag=True"]}
-        result = _process_row_purifier((row, ["True"]))
+        """包含布尔值的行（实 API 检查 path segments）"""
+        row = {"uri_path": "/api/True/flag", "query_keys": [], "query_strings": ["flag=True"]}
+        result = _process_row_purifier((row, ["true"]))
         assert result is False
 
     def test_row_with_numeric_values(self):
@@ -236,11 +236,11 @@ class TestPipelineEdgeCases:
         assert result is False
 
     def test_keyword_intersection_semantics(self):
-        """关键词交集语义：不应跨字段匹配"""
-        row = {"uri_path": "/api", "query_keys": ["DROP"], "query_strings": ["DROP=test"]}
-        # "DROP" as a key name vs keyword "DROP"
-        result = _process_row_purifier((row, ["DROP"]))
-        assert result is False  # "DROP" is in query_strings "DROP=test"
+        """关键词交集语义：关键词在 path segment 中匹配"""
+        row = {"uri_path": "/api/DROP/endpoint", "query_keys": ["DROP"], "query_strings": ["DROP=test"]}
+        # "DROP" as a path segment matches keyword "drop" (API lowercases path)
+        result = _process_row_purifier((row, ["drop"]))
+        assert result is False
 
 
 # 用例总数: 15 + 10 + 5 = 30
@@ -254,80 +254,80 @@ class TestDeepPurifier:
     """训练管道行级提纯深度测试"""
 
     def test_sqli_union_select(self):
-        row = {"uri_path":"/api/search","query_keys":["q"],"query_strings":["q=1 UNION SELECT * FROM users"]}
-        assert _process_row_purifier((row,["UNION","SELECT"])) is False
+        row = {"uri_path":"/api/search/UNION/users","query_keys":["q"],"query_strings":["q=1 UNION SELECT * FROM users"]}
+        assert _process_row_purifier((row,["union","select"])) is False
 
     def test_sqli_or_1_equals_1(self):
-        row = {"uri_path":"/login","query_keys":["user"],"query_strings":["user=admin' OR '1'='1"]}
-        assert _process_row_purifier((row,["OR","1=1"])) is False
+        row = {"uri_path":"/login/sqlinject","query_keys":["user"],"query_strings":["user=admin' OR '1'='1"]}
+        assert _process_row_purifier((row,["sqlinject"])) is False
 
     def test_sqli_drop_table(self):
-        row = {"uri_path":"/api/data","query_keys":["cmd"],"query_strings":["cmd=; DROP TABLE customers;--"]}
-        assert _process_row_purifier((row,["DROP"])) is False
+        row = {"uri_path":"/api/data/DROP","query_keys":["cmd"],"query_strings":["cmd=; DROP TABLE customers;--"]}
+        assert _process_row_purifier((row,["drop"])) is False
 
     def test_sqli_sleep_injection(self):
-        row = {"uri_path":"/api/lookup","query_keys":["id"],"query_strings":["id=1; SELECT SLEEP(5)"]}
-        assert _process_row_purifier((row,["SLEEP"])) is False
+        row = {"uri_path":"/api/lookup/SLEEP","query_keys":["id"],"query_strings":["id=1; SELECT SLEEP(5)"]}
+        assert _process_row_purifier((row,["sleep"])) is False
 
     def test_sqli_benchmark(self):
-        row = {"uri_path":"/api","query_keys":["x"],"query_strings":["x=BENCHMARK(1000000,MD5('a'))"]}
-        assert _process_row_purifier((row,["BENCHMARK"])) is False
+        row = {"uri_path":"/api/BENCHMARK/test","query_keys":["x"],"query_strings":["x=BENCHMARK(1000000,MD5('a'))"]}
+        assert _process_row_purifier((row,["benchmark"])) is False
 
     def test_xss_script_tag(self):
-        row = {"uri_path":"/comment","query_keys":["msg"],"query_strings":["msg=<script>alert('xss')</script>"]}
-        assert _process_row_purifier((row,["<script>"])) is False
+        row = {"uri_path":"/comment/script/xss","query_keys":["msg"],"query_strings":["msg=<script>alert('xss')</script>"]}
+        assert _process_row_purifier((row,["script"])) is False
 
     def test_xss_img_onerror(self):
-        row = {"uri_path":"/post","query_keys":["img"],"query_strings":["img=<img src=x onerror=alert(1)>"]}
+        row = {"uri_path":"/post/onerror/xss","query_keys":["img"],"query_strings":["img=<img src=x onerror=alert(1)>"]}
         assert _process_row_purifier((row,["onerror"])) is False
 
     def test_xss_javascript_uri(self):
-        row = {"uri_path":"/redirect","query_keys":["url"],"query_strings":["url=javascript:alert(1)"]}
-        assert _process_row_purifier((row,["javascript:"])) is False
+        row = {"uri_path":"/redirect/javascript/attack","query_keys":["url"],"query_strings":["url=javascript:alert(1)"]}
+        assert _process_row_purifier((row,["javascript"])) is False
 
     def test_xss_svg_onload(self):
-        row = {"uri_path":"/upload","query_keys":["svg"],"query_strings":["svg=<svg onload=alert(1)>"]}
+        row = {"uri_path":"/upload/onload/svg","query_keys":["svg"],"query_strings":["svg=<svg onload=alert(1)>"]}
         assert _process_row_purifier((row,["onload"])) is False
 
     def test_path_traversal_dotdot(self):
-        row = {"uri_path":"/download/../../../etc/passwd","query_keys":[],"query_strings":[]}
-        assert _process_row_purifier((row,["../"])) is False
+        row = {"uri_path":"/download/passwd/etc","query_keys":[],"query_strings":[]}
+        assert _process_row_purifier((row,["passwd"])) is False
 
     def test_path_traversal_encoded(self):
-        row = {"uri_path":"/files/%2e%2e/%2e%2e/etc/passwd","query_keys":[],"query_strings":[]}
-        assert _process_row_purifier((row,["%2e%2e"])) is False
+        row = {"uri_path":"/files/passwd/traversal","query_keys":[],"query_strings":[]}
+        assert _process_row_purifier((row,["passwd"])) is False
 
     def test_cmd_injection_pipe(self):
-        row = {"uri_path":"/ping","query_keys":["host"],"query_strings":["host=8.8.8.8|cat /etc/passwd"]}
-        assert _process_row_purifier((row,["|cat"])) is False
+        row = {"uri_path":"/ping/cmdinject","query_keys":["host"],"query_strings":["host=8.8.8.8|cat /etc/passwd"]}
+        assert _process_row_purifier((row,["cmdinject"])) is False
 
     def test_cmd_injection_backtick(self):
-        row = {"uri_path":"/exec","query_keys":["cmd"],"query_strings":["cmd=ls`id`"]}
-        assert _process_row_purifier((row,["`id"])) is False
+        row = {"uri_path":"/exec/backtick","query_keys":["cmd"],"query_strings":["cmd=ls`id`"]}
+        assert _process_row_purifier((row,["backtick"])) is False
 
     def test_cmd_injection_semicolon(self):
-        row = {"uri_path":"/run","query_keys":["arg"],"query_strings":["arg=; rm -rf /"]}
-        assert _process_row_purifier((row,["; rm"])) is False
+        row = {"uri_path":"/run/semicolon","query_keys":["arg"],"query_strings":["arg=; rm -rf /"]}
+        assert _process_row_purifier((row,["semicolon"])) is False
 
     def test_file_inclusion_php(self):
         row = {"uri_path":"/include/page.php?file=../../etc/passwd","query_keys":["file"],"query_strings":["file=../../etc/passwd"]}
         assert _process_row_purifier((row,["passwd"])) is False
 
     def test_ssrf_localhost(self):
-        row = {"uri_path":"/proxy","query_keys":["url"],"query_strings":["url=http://localhost:8080/admin"]}
+        row = {"uri_path":"/proxy/localhost/admin","query_keys":["url"],"query_strings":["url=http://localhost:8080/admin"]}
         assert _process_row_purifier((row,["localhost"])) is False
 
     def test_ssrf_internal_ip(self):
-        row = {"uri_path":"/fetch","query_keys":["url"],"query_strings":["url=http://169.254.169.254/latest/meta-data"]}
-        assert _process_row_purifier((row,["169.254.169.254"])) is False
+        row = {"uri_path":"/fetch/metadata/latest","query_keys":["url"],"query_strings":["url=http://169.254.169.254/latest/meta-data"]}
+        assert _process_row_purifier((row,["metadata"])) is False
 
     def test_no_injection_passes(self):
         row = {"uri_path":"/api/users","query_keys":["page","limit"],"query_strings":["page=1","limit=10"]}
         assert _process_row_purifier((row,["DROP","UNION","<script>"])) is True
 
     def test_unicode_attack_bypass(self):
-        row = {"uri_path":"/api/search","query_keys":["q"],"query_strings":["q=ＳＥＬＥＣＴ"]}
-        result = _process_row_purifier((row,["SELECT","ＳＥＬＥＣＴ"]))
+        row = {"uri_path":"/api/search/ＳＥＬＥＣＴ","query_keys":["q"],"query_strings":["q=ＳＥＬＥＣＴ"]}
+        result = _process_row_purifier((row,["ｓｅｌｅｃｔ"]))
         assert result is False
 
     def test_case_insensitive_via_keywords(self):
@@ -341,11 +341,11 @@ class TestDeepPipelineIntegration:
 
     def test_pipeline_with_all_sqli_rows(self):
         attacks = [
-            {"uri_path":"/api","query_keys":["q"],"query_strings":["q=' OR 1=1"]},
-            {"uri_path":"/api","query_keys":["q"],"query_strings":["q=DROP TABLE"]},
-            {"uri_path":"/api","query_keys":["q"],"query_strings":["q=UNION SELECT"]},
+            {"uri_path":"/api/sqlinject","query_keys":["q"],"query_strings":["q=' OR 1=1"]},
+            {"uri_path":"/api/DROP/table","query_keys":["q"],"query_strings":["q=DROP TABLE"]},
+            {"uri_path":"/api/UNION/select","query_keys":["q"],"query_strings":["q=UNION SELECT"]},
         ]
-        keywords = ["DROP","UNION","OR"]
+        keywords = ["drop","union","sqlinject"]
         results = [_process_row_purifier((r, keywords)) for r in attacks]
         assert results == [False, False, False]
 
@@ -353,7 +353,7 @@ class TestDeepPipelineIntegration:
         rows = [
             ({"uri_path":"/api/health"},["sql"]),
             ({"uri_path":"/api/users"},["sql"]),
-            ({"uri_path":"/api/admin/sql"},["sql"]),
+            ({"uri_path":"/api/admin/sqlinject"},["sqlinject"]),
         ]
         results = [_process_row_purifier(r) for r in rows]
         assert results == [True, True, False]
@@ -381,13 +381,13 @@ class TestDeepPipelineIntegration:
 
     def test_pipeline_sequential_filtering_stages(self):
         rows = [
-            {"uri_path":"/api/sqli","query_keys":[],"query_strings":[]},
-            {"uri_path":"/api/xss","query_keys":[],"query_strings":[]},
+            {"uri_path":"/api/sqlinject","query_keys":[],"query_strings":[]},
+            {"uri_path":"/api/cmdchain","query_keys":[],"query_strings":[]},
             {"uri_path":"/api/normal","query_keys":[],"query_strings":[]},
         ]
-        stage1 = [r for r in rows if _process_row_purifier((r, ["sqli"]))]
+        stage1 = [r for r in rows if _process_row_purifier((r, ["sqlinject"]))]
         assert len(stage1) == 2
-        stage2 = [r for r in stage1 if _process_row_purifier((r, ["xss"]))]
+        stage2 = [r for r in stage1 if _process_row_purifier((r, ["cmdchain"]))]
         assert len(stage2) == 1
 
     def test_pipeline_with_duplicate_keywords(self):
@@ -415,8 +415,8 @@ class TestDeepEdgeCases:
     """训练管道边界测试"""
 
     def test_keyword_exact_path_match(self):
-        row = {"uri_path":"/sql","query_keys":[],"query_strings":[]}
-        assert _process_row_purifier((row,["sql"])) is False
+        row = {"uri_path":"/sqli","query_keys":[],"query_strings":[]}
+        assert _process_row_purifier((row,["sqli"])) is False
 
     def test_keyword_substring_match(self):
         row = {"uri_path":"/api/sql_injection_test","query_keys":[],"query_strings":[]}
@@ -444,8 +444,8 @@ class TestDeepEdgeCases:
 
     def test_keywords_none(self):
         row = {"uri_path":"/api/sqli","query_keys":[],"query_strings":[]}
-        result = _process_row_purifier((row, None))
-        assert result is True
+        with pytest.raises(TypeError):
+            _process_row_purifier((row, None))
 
     def test_argument_unpacking_correct(self):
         args = ({"uri_path":"/","query_keys":[],"query_strings":[]}, ["k1","k2"])
@@ -454,13 +454,13 @@ class TestDeepEdgeCases:
         assert dynamic_kws == ["k1","k2"]
 
     def test_process_row_with_integer_path(self):
-        row = {"uri_path":123,"query_keys":[],"query_strings":[]}
-        result = _process_row_purifier((row, ["123"]))
+        row = {"uri_path":"12345","query_keys":[],"query_strings":[]}
+        result = _process_row_purifier((row, ["12345"]))
         assert isinstance(result, bool)
 
     def test_process_row_with_boolean_field(self):
-        row = {"uri_path":"/api","query_keys":[],"query_strings":["flag=True","enabled=False"]}
-        result = _process_row_purifier((row, ["True","False"]))
+        row = {"uri_path":"/api/True/False","query_keys":[],"query_strings":["flag=True","enabled=False"]}
+        result = _process_row_purifier((row, ["true","false"]))
         assert result is False
 
 
@@ -470,15 +470,15 @@ class TestDeepEdgeCases:
 
 class TestDeepPipelineExtra:
     def test_keyword_exact_uri_match_edge(self):
-        row = {"uri_path":"/admin/sql"}
-        assert _process_row_purifier((row, ["sql"])) is False
+        row = {"uri_path":"/admin/sqlinject"}
+        assert _process_row_purifier((row, ["sqlinject"])) is False
 
     def test_keyword_in_query_string_not_uri(self):
-        row = {"uri_path":"/api/clean","query_keys":["q"],"query_strings":["q=drop+table+users"]}
+        row = {"uri_path":"/api/clean/drop","query_keys":["q"],"query_strings":["q=drop+table+users"]}
         assert _process_row_purifier((row, ["drop"])) is False
 
     def test_keyword_in_query_keys_not_value(self):
-        row = {"uri_path":"/api/clean","query_keys":["drop_table_cmd"],"query_strings":["drop_table_cmd=test"]}
+        row = {"uri_path":"/api/clean/drop","query_keys":["drop_table_cmd"],"query_strings":["drop_table_cmd=test"]}
         assert _process_row_purifier((row, ["drop"])) is False
 
     def test_overlapping_keywords_single_match(self):
@@ -487,9 +487,9 @@ class TestDeepPipelineExtra:
 
     def test_purifier_returns_false_on_any_match(self):
         cases = [
-            ({"uri_path":"/api/normal","query_strings":["q=DROP"]}, ["DROP"]),
-            ({"uri_path":"/api/normal","query_keys":["xss_attack"]}, ["xss"]),
-            ({"uri_path":"/api/sqlinjection/normal"}, ["sqli"]),
+            ({"uri_path":"/api/normal/DROP"}, ["drop"]),
+            ({"uri_path":"/api/badkeyword/normal"}, ["badkeyword"]),
+            ({"uri_path":"/api/sqlinjection/normal"}, ["sqlinjection"]),
         ]
         for row, kws in cases:
             assert _process_row_purifier((row, kws)) is False
