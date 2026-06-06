@@ -174,13 +174,19 @@ class AIWAFStreamEngine:
         try:
             result = await future
         except Exception as e:
-            await self._route_to_dlq(std_log, e)
+            try:
+                await self._route_to_dlq(std_log, e)
+            except Exception:
+                pass
             return
 
         if isinstance(result, ItemErrorResult):
             if redis_available and result.side_effects.get('blocked_ips'):
                 asyncio.create_task(self.facade.batch_block_ips(result.side_effects.get('blocked_ips', [])))
-            await self._route_to_dlq(std_log, Exception(f"{result.error_type}: {result.error_msg}"))
+            try:
+                await self._route_to_dlq(std_log, Exception(f"{result.error_type}: {result.error_msg}"))
+            except Exception:
+                pass
             return
 
         if redis_available:
