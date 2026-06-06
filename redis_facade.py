@@ -71,10 +71,10 @@ _current_buffer = _pending_buffer_A
 _backup_buffer = _pending_buffer_B
 
 
-async def background_sync_worker(state_mgr: RedisClusterStateManager):
+async def background_sync_worker(state_mgr: RedisClusterStateManager, cancel_event: asyncio.Event = None):
     """高优先级写回 Worker (双缓冲机制)"""
     global _current_buffer, _backup_buffer
-    while True:
+    while not (cancel_event and cancel_event.is_set()):
         await asyncio.sleep(5)
         if not _current_buffer:
             continue

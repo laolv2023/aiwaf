@@ -6,6 +6,7 @@ import orjson
 import asyncbreaker
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
+from typing import List
 from aiokafka import AIOKafkaProducer
 from prometheus_client import Counter
 
@@ -15,6 +16,7 @@ from redis_facade import (
     local_blacklist, local_rate_limit,
     _current_buffer, _backup_buffer, background_sync_worker
 )
+from aiwaf.core.rate_limit import FLOOD_BLOCK
 
 METRIC_ENGINE_IN = Counter('aiwaf_engine_in_total', 'Logs received')
 METRIC_DLQ_OUT = Counter('aiwaf_dlq_out_total', 'Messages routed to DLQ')
@@ -40,22 +42,42 @@ class AIWAFStreamEngine:
             enable_idempotence=True, acks='all'
         )
 
-        self.dynamic_keywords_cache = []
+        self.dynamic_keywords_cache: List[str] = []
+        self._tasks: list = []
+        self._cancel_event = asyncio.Event()
 
     async def start(self):
         await self.producer.start()
-        asyncio.create_task(self._batch_dispatcher())
-        asyncio.create_task(background_sync_worker(self.facade.mgr))
-        asyncio.create_task(self._keyword_refresh_worker())
+        self._tasks.append(asyncio.create_task(self._batch_dispatcher()))
+        self._tasks.append(asyncio.create_task(background_sync_worker(self.facade.mgr, self._cancel_event)))
+        self._tasks.append(asyncio.create_task(self._keyword_refresh_worker()))
+
+    async def shutdown(self):
+        """优雅关闭：取消后台任务、排空队列、关闭连接。"""
+        self._cancel_event.set()
+        for t in self._tasks:
+            t.cancel()
+        await asyncio.gather(*self._tasks, return_exceptions=True)
+        self.core_executor.shutdown(wait=True)
+        try:
+            await self.producer.stop()
+        except Exception:
+            pass
 
     async def _keyword_refresh_worker(self):
         """后台独立 Task 每 10 秒刷新缓存"""
-        while True:
+        while not self._cancel_event.is_set():
             try:
                 self.dynamic_keywords_cache = await self.facade.get_top_keywords(500)
             except (asyncbreaker.CircuitBreakerError, OSError, asyncio.TimeoutError):
                 pass
-            await asyncio.sleep(10)
+            try:
+                await asyncio.wait_for(
+                    asyncio.sleep(10),
+                    timeout=10,
+                )
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                return
 
     async def _batch_dispatcher(self):
         """自适应微批调度器 (带 BrokenProcessPool 容错)"""
@@ -112,9 +134,9 @@ class AIWAFStreamEngine:
 
     async def process_log(self, std_log: dict, is_retry=False, retry_count=0):
         METRIC_ENGINE_IN.inc()
-        trace_id = std_log["trace_id"]
-        ip = std_log["client_ip"]
-        event_time = std_log["timestamp"]
+        trace_id = std_log.get("trace_id", "unknown")
+        ip = std_log.get("client_ip", "unknown")
+        event_time = std_log.get("timestamp", 0.0)
 
         redis_available = True
         try:
@@ -157,20 +179,26 @@ class AIWAFStreamEngine:
 
         if isinstance(result, ItemErrorResult):
             if redis_available and result.side_effects.get('blocked_ips'):
-                asyncio.create_task(self.facade.batch_block_ips(result.side_effects['blocked_ips']))
+                asyncio.create_task(self.facade.batch_block_ips(result.side_effects.get('blocked_ips', [])))
             await self._route_to_dlq(std_log, Exception(f"{result.error_type}: {result.error_msg}"))
             return
 
         if redis_available:
-            if result.side_effects['blocked_ips']:
-                asyncio.create_task(self.facade.batch_block_ips(result.side_effects['blocked_ips']))
-            if result.side_effects['learned_keywords']:
-                asyncio.create_task(self._batch_add_keywords(result.side_effects['learned_keywords']))
+            if result.side_effects.get('blocked_ips'):
+                asyncio.create_task(self.facade.batch_block_ips(result.side_effects.get('blocked_ips', [])))
+            if result.side_effects.get('learned_keywords'):
+                asyncio.create_task(self._batch_add_keywords(result.side_effects.get('learned_keywords', [])))
 
-        if result.rl_decision.action == "flood_block":
-            await self._emit_alert(std_log, "RateLimitFlood")
+        if result.rl_decision.action == FLOOD_BLOCK:
+            try:
+                await self._emit_alert(std_log, "RateLimitFlood")
+            except Exception:
+                pass
         elif result.kw_decision.block_reason:
-            await self._emit_alert(std_log, f"KeywordBlock:{result.kw_decision.block_reason}")
+            try:
+                await self._emit_alert(std_log, f"KeywordBlock:{result.kw_decision.block_reason}")
+            except Exception:
+                pass
 
     async def _batch_add_keywords(self, kws: list):
         if not kws:
@@ -181,7 +209,12 @@ class AIWAFStreamEngine:
             pass
 
     async def _emit_alert(self, std_log: dict, rule: str):
-        alert = {"trace_id": std_log["trace_id"], "rule_id": rule, "alert_timestamp": std_log["timestamp"], "client_ip": std_log["client_ip"]}
+        alert = {
+            "trace_id": std_log.get("trace_id"),
+            "rule_id": rule,
+            "alert_timestamp": std_log.get("timestamp"),
+            "client_ip": std_log.get("client_ip"),
+        }
         await self.producer.send_and_wait(self.settings.alert_topic, orjson.dumps(alert))
 
     async def _route_to_dlq(self, std_log: dict, error: Exception):

@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import List, Tuple, Any
 
 from aiwaf.core.rate_limit import evaluate_rate_limit
-from aiwaf.core.ip_keyword import evaluate_keyword_policy, extract_path_segments
+from aiwaf.core.ip_keyword import evaluate_keyword_policy
 
 
 @dataclass
