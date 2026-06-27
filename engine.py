@@ -2,12 +2,13 @@
 AIWAF-Stream 异步流式检测引擎
 """
 import asyncio
+import time
 import orjson
 import asyncbreaker
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from typing import List
-from aiokafka import AIOKafkaProducer
+from aiokafka import AIOKafkaProducer, AIOKafkaConsumer
 from prometheus_client import Counter
 
 from acl_bootstrap import init_worker, run_core_logic_batch_isolated, ItemErrorResult
@@ -17,6 +18,8 @@ from redis_facade import (
     _current_buffer, _backup_buffer, background_sync_worker
 )
 from aiwaf.core.rate_limit import FLOOD_BLOCK
+from akto_adapter import parse_akto_json_message
+from preprocessor import transform_raw_log
 
 METRIC_ENGINE_IN = Counter('aiwaf_engine_in_total', 'Logs received')
 METRIC_DLQ_OUT = Counter('aiwaf_dlq_out_total', 'Messages routed to DLQ')
@@ -45,12 +48,28 @@ class AIWAFStreamEngine:
         self.dynamic_keywords_cache: List[str] = []
         self._tasks: list = []
         self._cancel_event = asyncio.Event()
+        self.consumer = None
 
     async def start(self):
         await self.producer.start()
+
+        # Consumer（新增：消费 Akto Kafka 流量）
+        self.consumer = AIOKafkaConsumer(
+            self.settings.input_topic,
+            bootstrap_servers=self.settings.kafka_brokers,
+            group_id=self.settings.consumer_group,
+            value_deserializer=lambda v: v,
+            key_deserializer=lambda v: v.decode('utf-8') if v else None,
+            auto_offset_reset="earliest",
+            enable_auto_commit=False,
+            max_poll_records=500,
+        )
+        await self.consumer.start()
+
         self._tasks.append(asyncio.create_task(self._batch_dispatcher()))
         self._tasks.append(asyncio.create_task(background_sync_worker(self.facade.mgr, self._cancel_event)))
         self._tasks.append(asyncio.create_task(self._keyword_refresh_worker()))
+        self._tasks.append(asyncio.create_task(self._consume_loop()))
 
     async def shutdown(self):
         """优雅关闭：取消后台任务、排空队列、关闭连接。"""
@@ -59,6 +78,11 @@ class AIWAFStreamEngine:
             t.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
         self.core_executor.shutdown(wait=True)
+        if self.consumer is not None:
+            try:
+                await self.consumer.stop()
+            except Exception:
+                pass
         try:
             await self.producer.stop()
         except Exception:
@@ -216,12 +240,70 @@ class AIWAFStreamEngine:
 
     async def _emit_alert(self, std_log: dict, rule: str):
         alert = {
+            # 现有字段
             "trace_id": std_log.get("trace_id"),
             "rule_id": rule,
             "alert_timestamp": std_log.get("timestamp"),
             "client_ip": std_log.get("client_ip"),
+
+            # 新增：akto 上下文（便于 akto 侧关联分析）
+            "akto_account_id": std_log.get("akto_account_id", ""),
+            "akto_vxlan_id": std_log.get("akto_vxlan_id", ""),
+            "source": std_log.get("source", ""),
+            "direction": std_log.get("direction", ""),
+
+            # 新增：请求上下文
+            "method": std_log.get("method", "GET"),
+            "uri_path": std_log.get("uri_path", "/"),
+            "status_code": std_log.get("status_code", 200),
+
+            # 新增：检测元数据
+            "detected_at": time.time(),
+            "severity": self._classify_severity(rule),
+            "req_body_truncated": std_log.get("req_body_truncated", ""),
         }
         await self.producer.send_and_wait(self.settings.alert_topic, orjson.dumps(alert))
+
+    def _classify_severity(self, rule: str) -> str:
+        """根据规则名称分类严重程度"""
+        rule_lower = rule.lower()
+        if "flood" in rule_lower or "ratelimit" in rule_lower:
+            return "MEDIUM"
+        if "keyword" in rule_lower:
+            return "HIGH"
+        if "blacklist" in rule_lower:
+            return "HIGH"
+        return "LOW"
+
+    async def _consume_loop(self):
+        """Kafka 消费循环 — 消费 akto.api.logs，适配后送入检测引擎"""
+        async for batch in self.consumer:
+            for msg in batch:
+                try:
+                    # JSON → raw_log dict
+                    raw_log = parse_akto_json_message(msg.value.decode('utf-8'))
+                    # raw_log → std_log (生成 trace_id, 拆分 query, 截断 body)
+                    std_log = transform_raw_log(raw_log)
+                    await self.process_log(std_log)
+                except Exception as e:
+                    # 处理失败 → DLQ
+                    dlq_payload = {
+                        "trace_id": None,
+                        "error": f"Processing failed: {e}",
+                        "error_type": type(e).__name__,
+                        "raw_log": msg.value.hex(),
+                        "topic": msg.topic,
+                        "partition": msg.partition,
+                        "offset": msg.offset,
+                    }
+                    await self.producer.send_and_wait(
+                        self.settings.dlq_topic,
+                        orjson.dumps(dlq_payload)
+                    )
+                    METRIC_DLQ_OUT.inc()
+
+            # 手动提交 offset
+            await self.consumer.commit()
 
     async def _route_to_dlq(self, std_log: dict, error: Exception):
         METRIC_DLQ_OUT.inc()
