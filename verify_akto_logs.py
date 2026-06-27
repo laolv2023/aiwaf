@@ -52,7 +52,7 @@ async def verify():
             )
             ok += 1
         except Exception as e:
-            print(f"[FAIL] {e} | raw={msg.value[:200]}")
+            print(f"[FAIL] {type(e).__name__}: {str(e)[:200]}")
             fail += 1
         count += 1
         if count >= 10:
