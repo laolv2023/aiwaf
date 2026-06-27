@@ -18,15 +18,19 @@ AIWAF 从 Akto 的 Kafka Topic `akto.api.logs`（JSON 格式）消费 API 流量
 │  data-ingestion-service ──→ Kafka: akto.api.logs (JSON)    │
 │  (SDK/Agent/Apigee/Arcade 等多源流量接入)                      │
 │                                         │                  │
-│  ┌──────────────────────────────────────┤                  │
-│  │              │              │         │                  │
-│  ▼              ▼              ▼         ▼                  │
-│  api-runtime   api-analyser  threat-detection  AIWAF (新增) │
-│  (现有消费者)   (现有消费者)   (经 akto.api.logs2)  (新消费者) │
+│                    ┌───────────────────┤                  │
+│                    │                   │                    │
+│                    ▼                   ▼                    │
+│             api-runtime          AIWAF (新增)                │
+│             api-analyser         (消费 akto.api.logs)        │
+│             (现有消费者)                                        │
 │                                                            │
-└──────────────────────────────────┬───────────────────────┘
-                                   │
-                                   ▼
+│  ※ threat-detection 消费 akto.api.logs2 (Protobuf)           │
+│    与 AIWAF 不在同一 Topic，互不影响                            │
+│                                                            │
+└────────────────────────┬─────────────────────────────────┘
+                           │
+                           ▼
                         ┌─────────────────────┐
                         │  AIWAF-Stream Engine │
                         │                     │
@@ -148,7 +152,7 @@ acl_bootstrap.py         ← 现有：run_core_logic_batch_isolated()
 
 ## 3. 改造方案
 
-### 3.1 新增文件：akto_adapter.py
+### 3.1 新增文件：akto_adapter.py（项目根目录）
 
 ```python
 # akto_adapter.py — 新增文件
@@ -225,6 +229,8 @@ def parse_akto_json_message(raw_json: str) -> Dict[str, Any]:
 # engine.py 改造 — 新增 Consumer
 
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
+from akto_adapter import parse_akto_json_message
+from preprocessor import transform_raw_log
 
 class AIWAFStreamEngine:
     def __init__(self, settings, state_mgr, model_path):
@@ -258,16 +264,17 @@ class AIWAFStreamEngine:
 
     async def _consume_loop(self):
         """Kafka 消费循环 — 替代外部调用 process_log()"""
-        from akto_adapter import parse_akto_json_message
-
+        # import 已在文件顶部完成
         async for batch in self.consumer:
             for msg in batch:
                 try:
                     # JSON → raw_log dict
                     raw_log = parse_akto_json_message(msg.value.decode('utf-8'))
-                    await self.process_log(raw_log)
+                    # raw_log → std_log (生成 trace_id, 拆分 query, 截断 body)
+                    std_log = transform_raw_log(raw_log)
+                    await self.process_log(std_log)
                 except Exception as e:
-                    # 反序列化失败 → DLQ
+                    # 处理失败 → DLQ
                     dlq_payload = {
                         "trace_id": None,
                         "error": f"Processing failed: {e}",
@@ -345,6 +352,17 @@ async def _emit_alert(self, std_log: dict, rule: str):
         self.settings.alert_topic,  # → "akto.aiwaf.alerts"
         orjson.dumps(alert)
     )
+
+def _classify_severity(self, rule: str) -> str:
+    """根据规则名称分类严重程度"""
+    rule_lower = rule.lower()
+    if "flood" in rule_lower or "ratelimit" in rule_lower:
+        return "MEDIUM"
+    if "keyword" in rule_lower:
+        return "HIGH"
+    if "blacklist" in rule_lower:
+        return "HIGH"
+    return "LOW"
 ```
 
 ### 3.6 requirements.txt
@@ -405,7 +423,7 @@ def test_field_mapping():
     assert std_log["status_code"] == 200
     assert std_log["timestamp"] == 1719500000.0
     assert std_log["trace_id"]                   # 非空
-    assert len(std_log["trace_id"]) == 32        # MD5 截断
+    assert len(std_log["trace_id"]) == 32        # SHA256 截断 32 字符
     assert std_log["query_keys"] == ["name", "age"]
     assert std_log["query_strings"] == ["name=alice", "age=30"]
     assert "request_body" not in std_log         # 已被 del
@@ -603,4 +621,5 @@ AIWAF Consumer (新增)
         "detected_at", "severity", "req_body_truncated"
       }
 ```
+
 
