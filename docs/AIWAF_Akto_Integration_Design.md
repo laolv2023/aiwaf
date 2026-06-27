@@ -142,6 +142,8 @@ acl_bootstrap.py         ← 现有：run_core_logic_batch_isolated()
 
 6. **`trace_id` 由 `generate_deterministic_trace_id` 生成** — 依赖 `client_ip` + `uri_path` + `timestamp` + `request_body`，适配层需全部提供
 
+7. **`transform_raw_log` 重建 dict 不透传额外字段（关键 Bug）** — `transform_raw_log` 输出只有 9 个固定 key（`client_ip`, `timestamp`, `method`, `uri_path`, `query_keys`, `query_strings`, `status_code`, `trace_id`, `req_body_truncated`），适配层输出的 akto 扩展字段（`akto_account_id` 等）会丢失。**需在 `transform_raw_log` 末尾添加透传逻辑**，否则 `_emit_alert` 中 `std_log.get("akto_account_id")` 始终为空
+
 ---
 
 ## 3. 改造方案
@@ -199,7 +201,25 @@ def parse_akto_json_message(raw_json: str) -> Dict[str, Any]:
     }
 ```
 
-### 3.2 改造 engine.py — 新增 Consumer
+### 3.2 改造 preprocessor.py — 透传 akto 扩展字段
+
+`transform_raw_log` 重建 dict 时只保留 9 个固定 key，akto 扩展字段会丢失。需在末尾添加透传逻辑：
+
+```python
+# preprocessor.py transform_raw_log() 末尾，return std_log 之前添加：
+
+    # 透传 akto 扩展字段（用于 _emit_alert 告警输出）
+    for k in ("akto_account_id", "akto_vxlan_id", "source", "direction",
+              "dest_ip", "response_payload"):
+        if k in raw_log:
+            std_log[k] = raw_log[k]
+
+    return std_log
+```
+
+**影响范围**：仅新增 4 行，不改变现有 9 个 key 的逻辑。如果 `raw_log` 中没有这些字段（非 Akto 数据源），循环体不执行，完全向后兼容。
+
+### 3.3 改造 engine.py — 新增 Consumer
 
 ```python
 # engine.py 改造 — 新增 Consumer
@@ -267,7 +287,7 @@ class AIWAFStreamEngine:
             await self.consumer.commit()
 ```
 
-### 3.3 Settings 扩展
+### 3.4 Settings 扩展
 
 ```python
 class Settings:
@@ -294,7 +314,7 @@ class Settings:
 | `KAFKA_DLQ_TOPIC` | `akto.aiwaf.dlq` | 死信 Topic |
 | `KAFKA_CONSUMER_GROUP` | `aiwaf-consumer-group` | Consumer Group ID |
 
-### 3.4 告警输出格式增强
+### 3.5 告警输出格式增强
 
 ```python
 async def _emit_alert(self, std_log: dict, rule: str):
@@ -327,7 +347,7 @@ async def _emit_alert(self, std_log: dict, rule: str):
     )
 ```
 
-### 3.5 requirements.txt
+### 3.6 requirements.txt
 
 无需新增依赖 — JSON 解析用 Python 内置 `json` 模块，`urllib.parse` 也是内置。无需 Protobuf。
 
@@ -518,16 +538,17 @@ asyncio.run(verify())
 | # | 文件 | 改动 | 优先级 | 工作量 |
 |---|---|---|---|---|
 | 1 | 新增 `akto_adapter.py` | JSON 反序列化 + 字段映射 + 类型转换 | P0 | 1h |
-| 2 | `engine.py` | 新增 AIOKafkaConsumer + `_consume_loop()` | P0 | 2h |
-| 3 | `engine.py` | `_emit_alert()` 字段丰富 | P1 | 1h |
-| 4 | Settings / 环境变量 | `input_topic`, `consumer_group` 等 | P0 | 30min |
-| 5 | 新增 `tests/test_akto_adapter.py` | 适配层单测（7 个用例） | P0 | 1.5h |
-| 6 | 新增 `tests/test_consume_loop.py` | 消费循环集成测试 | P1 | 1.5h |
-| 7 | `verify_akto_logs.py` | 端到端验证脚本 | P0 | 30min |
-| 8 | `requirements.txt` | 无需改动（JSON 用内置库） | — | 0 |
-| **合计** | | | | **~8h** |
+| 2 | `preprocessor.py` | `transform_raw_log` 末尾添加 akto 扩展字段透传（4 行） | P0 | 15min |
+| 3 | `engine.py` | 新增 AIOKafkaConsumer + `_consume_loop()` | P0 | 2h |
+| 4 | `engine.py` | `_emit_alert()` 字段丰富 | P1 | 1h |
+| 5 | Settings / 环境变量 | `input_topic`, `consumer_group` 等 | P0 | 30min |
+| 6 | 新增 `tests/test_akto_adapter.py` | 适配层单测（7 个用例） | P0 | 1.5h |
+| 7 | 新增 `tests/test_consume_loop.py` | 消费循环集成测试 | P1 | 1.5h |
+| 8 | `verify_akto_logs.py` | 端到端验证脚本 | P0 | 30min |
+| 9 | `requirements.txt` | 无需改动（JSON 用内置库） | — | 0 |
+| **合计** | | | | **~8.25h** |
 
-> 对比原方案（13h），删除了 Protobuf 编译（-2.5h）、proto stub 生成（-30min）、protobuf 依赖（-5min），减少了约 5h 工作量。
+> 对比原方案（13h），删除了 Protobuf 编译（-2.5h）、proto stub 生成（-30min）、protobuf 依赖（-5min），减少了约 5h 工作量。新增 preprocessor.py 透传修改（+15min）。
 
 ---
 
@@ -582,3 +603,4 @@ AIWAF Consumer (新增)
         "detected_at", "severity", "req_body_truncated"
       }
 ```
+
