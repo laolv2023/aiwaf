@@ -11,7 +11,7 @@ Akto Kafka 数据源适配层
 
 参考文档: docs/AIWAF_Akto_Integration_Design.md §3.1
 """
-import json
+import orjson
 from urllib.parse import urlparse, parse_qs
 from typing import Dict, Any
 
@@ -27,9 +27,13 @@ def parse_akto_json_message(raw_json: str) -> Dict[str, Any]:
         raw_log dict，包含 7 个核心字段 + 6 个 akto 扩展字段
 
     Raises:
-        json.JSONDecodeError: JSON 解析失败
+        orjson.JSONDecodeError: JSON 解析失败
     """
-    msg = json.loads(raw_json) if isinstance(raw_json, (str, bytes)) else raw_json
+    msg = orjson.loads(raw_json) if isinstance(raw_json, (str, bytes)) else raw_json
+
+    # 防御：orjson.loads 可能返回 list/str/number 等非 dict 类型
+    if not isinstance(msg, dict):
+        raise ValueError(f"Expected JSON object, got {type(msg).__name__}")
 
     # path 含完整 URI（含 query string），需拆分
     # 兼容两种格式：纯路径 "/api/v1" 或完整 URL "https://host/api/v1?foo=bar"
