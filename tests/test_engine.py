@@ -25,6 +25,8 @@ class MockSettings:
     kafka_brokers: str = "localhost:9092"
     alert_topic: str = "aiwaf_alert"
     dlq_topic: str = "aiwaf_dlq"
+    input_topic: str = "akto.api.logs"
+    consumer_group: str = "aiwaf-test-group"
 
 
 class MockStateMgr:
@@ -305,17 +307,18 @@ class TestBatchAndDLQ:
     @pytest.fixture
     def engine(self):
         with patch('concurrent.futures.ProcessPoolExecutor', MagicMock()):
-            with patch('aiokafka.AIOKafkaProducer', MagicMock()):
-                with patch('acl_bootstrap.init_worker'):
-                    with patch('acl_bootstrap.run_core_logic_batch_isolated'):
-                        from engine import AIWAFStreamEngine
-                        import redis_facade
-                        redis_facade.local_blacklist.clear()
-                        redis_facade.local_rate_limit.clear()
-                        eng = AIWAFStreamEngine(MockSettings(), MockStateMgr(), "/f")
-                        eng.producer.start = AsyncMock()
-                        eng.producer.send_and_wait = AsyncMock()
-                        return eng
+            with patch('engine.AIOKafkaProducer', MagicMock()):
+                with patch('engine.AIOKafkaConsumer', MagicMock()):
+                    with patch('acl_bootstrap.init_worker'):
+                        with patch('acl_bootstrap.run_core_logic_batch_isolated'):
+                            from engine import AIWAFStreamEngine
+                            import redis_facade
+                            redis_facade.local_blacklist.clear()
+                            redis_facade.local_rate_limit.clear()
+                            eng = AIWAFStreamEngine(MockSettings(), MockStateMgr(), "/f")
+                            eng.producer.start = AsyncMock()
+                            eng.producer.send_and_wait = AsyncMock()
+                            return eng
 
     @pytest.mark.asyncio
     async def test_batch_queue_put_and_get(self, engine):
@@ -493,7 +496,13 @@ class TestBatchAndDLQ:
     @pytest.mark.asyncio
     async def test_start_creates_tasks(self, engine):
         engine.producer.start = AsyncMock()
-        await engine.start()
+        # Consumer is created in start(), mock it before calling
+        with patch('engine.AIOKafkaConsumer') as MockConsumer:
+            mock_instance = MockConsumer.return_value
+            mock_instance.start = AsyncMock()
+            await engine.start()
+        assert len(engine._tasks) == 4
+        await engine.shutdown()
 
     @pytest.mark.asyncio
     async def test_future_exception_routes_to_dlq(self, engine):
@@ -527,17 +536,18 @@ class TestSupplementaryEngine:
     @pytest.fixture
     def engine(self):
         with patch('concurrent.futures.ProcessPoolExecutor', MagicMock()):
-            with patch('aiokafka.AIOKafkaProducer', MagicMock()):
-                with patch('acl_bootstrap.init_worker'):
-                    with patch('acl_bootstrap.run_core_logic_batch_isolated'):
-                        from engine import AIWAFStreamEngine
-                        import redis_facade
-                        redis_facade.local_blacklist.clear()
-                        redis_facade.local_rate_limit.clear()
-                        eng = AIWAFStreamEngine(MockSettings(), MockStateMgr(), "/f")
-                        eng.producer.start = AsyncMock()
-                        eng.producer.send_and_wait = AsyncMock()
-                        return eng
+            with patch('engine.AIOKafkaProducer', MagicMock()):
+                with patch('engine.AIOKafkaConsumer', MagicMock()):
+                    with patch('acl_bootstrap.init_worker'):
+                        with patch('acl_bootstrap.run_core_logic_batch_isolated'):
+                            from engine import AIWAFStreamEngine
+                            import redis_facade
+                            redis_facade.local_blacklist.clear()
+                            redis_facade.local_rate_limit.clear()
+                            eng = AIWAFStreamEngine(MockSettings(), MockStateMgr(), "/f")
+                            eng.producer.start = AsyncMock()
+                            eng.producer.send_and_wait = AsyncMock()
+                            return eng
 
     @pytest.mark.asyncio
     async def test_process_log_with_body_truncated(self, engine):
