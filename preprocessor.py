@@ -54,7 +54,7 @@ def transform_raw_log(raw_log: dict) -> dict:
 
     std_log = {
         "client_ip": raw_log.get("client_ip") or raw_log.get("remote_addr"),
-        "timestamp": raw_log.get("timestamp"),
+        "timestamp": raw_log.get("timestamp") if raw_log.get("timestamp") is not None else 0.0,
         "method": raw_log.get("method", "GET"),
         "uri_path": raw_log.get("uri_path", "/"),
         "query_keys": query_keys,
