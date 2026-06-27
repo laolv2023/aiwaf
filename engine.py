@@ -105,7 +105,7 @@ class AIWAFStreamEngine:
 
     async def _batch_dispatcher(self):
         """自适应微批调度器 (带 BrokenProcessPool 容错)"""
-        while True:
+        while not self._cancel_event.is_set():
             batch_logs, batch_ts, batch_et, batch_futures = [], [], [], []
             try:
                 item = await self.batch_queue.get()
@@ -266,7 +266,7 @@ class AIWAFStreamEngine:
 
     def _classify_severity(self, rule: str) -> str:
         """根据规则名称分类严重程度"""
-        rule_lower = rule.lower()
+        rule_lower = (rule or "").lower()
         if "flood" in rule_lower or "ratelimit" in rule_lower:
             return "MEDIUM"
         if "keyword" in rule_lower:
@@ -277,33 +277,53 @@ class AIWAFStreamEngine:
 
     async def _consume_loop(self):
         """Kafka 消费循环 — 消费 akto.api.logs，适配后送入检测引擎"""
-        async for batch in self.consumer:
-            for msg in batch:
-                try:
-                    # JSON → raw_log dict
-                    raw_log = parse_akto_json_message(msg.value.decode('utf-8'))
-                    # raw_log → std_log (生成 trace_id, 拆分 query, 截断 body)
-                    std_log = transform_raw_log(raw_log)
-                    await self.process_log(std_log)
-                except Exception as e:
-                    # 处理失败 → DLQ
-                    dlq_payload = {
-                        "trace_id": None,
-                        "error": f"Processing failed: {e}",
-                        "error_type": type(e).__name__,
-                        "raw_log": msg.value.hex(),
-                        "topic": msg.topic,
-                        "partition": msg.partition,
-                        "offset": msg.offset,
-                    }
-                    await self.producer.send_and_wait(
-                        self.settings.dlq_topic,
-                        orjson.dumps(dlq_payload)
-                    )
-                    METRIC_DLQ_OUT.inc()
+        while not self._cancel_event.is_set():
+            try:
+                async for batch in self.consumer:
+                    for msg in batch:
+                        try:
+                            # JSON → raw_log dict
+                            raw_log = parse_akto_json_message(msg.value.decode('utf-8'))
+                            # raw_log → std_log (生成 trace_id, 拆分 query, 截断 body)
+                            std_log = transform_raw_log(raw_log)
+                            await self.process_log(std_log)
+                        except Exception as e:
+                            # 处理失败 → DLQ
+                            try:
+                                dlq_payload = {
+                                    "trace_id": None,
+                                    "error": f"Processing failed: {e}",
+                                    "error_type": type(e).__name__,
+                                    "raw_log": msg.value.hex(),
+                                    "topic": msg.topic,
+                                    "partition": msg.partition,
+                                    "offset": msg.offset,
+                                }
+                                await self.producer.send_and_wait(
+                                    self.settings.dlq_topic,
+                                    orjson.dumps(dlq_payload)
+                                )
+                                METRIC_DLQ_OUT.inc()
+                            except Exception:
+                                # DLQ 发送也失败，记录日志后继续，不阻断消费
+                                pass
 
-            # 手动提交 offset
-            await self.consumer.commit()
+                    # 手动提交 offset（commit 失败不阻断，下次会重新消费）
+                    try:
+                        await self.consumer.commit()
+                    except Exception:
+                        pass
+
+                    if self._cancel_event.is_set():
+                        break
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                # 消费循环异常（如 Kafka rebalance），等待后重试
+                try:
+                    await asyncio.sleep(5)
+                except asyncio.CancelledError:
+                    break
 
     async def _route_to_dlq(self, std_log: dict, error: Exception):
         METRIC_DLQ_OUT.inc()
