@@ -120,6 +120,10 @@ class Settings:
     auto_block_enabled: bool = True            # 自动拉黑 IP（False=只告警不拉黑，需人工审批）
     auto_learn_keywords: bool = True           # 自动学习关键词（False=只告警不学习）
 
+    # 按路径禁用检测模块（JSON 字符串，格式同 PATH_RULES）
+    # 示例: [{"path": "/api/webhooks/", "disable": ["header_validation", "uuid_tamper"]}]
+    path_rules: str = ""
+
     @classmethod
     def from_yaml(cls, path: str) -> "Settings":
         """从 YAML 配置文件加载"""
@@ -204,6 +208,7 @@ class Settings:
             "kafka_retry_interval":        "KAFKA_RETRY_INTERVAL",
             "auto_block_enabled":          "AUTO_BLOCK_ENABLED",
             "auto_learn_keywords":         "AUTO_LEARN_KEYWORDS",
+            "path_rules":                  "PATH_RULES",
         }
 
         int_fields = {
