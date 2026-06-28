@@ -49,6 +49,51 @@ class AIWAFStreamEngine:
             max_store_bytes=settings.max_body_store_bytes,
         )
 
+        # 根据 settings 追加预定义特征（模块变量覆盖，不替换默认值）
+        self._apply_extra_patterns(settings)
+
+    def _apply_extra_patterns(self, settings):
+        """将配置中的追加特征合并到模块常量"""
+        import aiwaf.core.ip_keyword as ip_kw
+        import aiwaf.core.malicious_context as mc
+        import aiwaf.core.honeypot as hp
+
+        # STATIC_KW 追加
+        if settings.static_keywords_extra:
+            extra = [s.strip() for s in settings.static_keywords_extra.split(",") if s.strip()]
+            mc.STATIC_KW = list(mc.STATIC_KW) + extra
+
+        # DEFAULT_LEGITIMATE_KEYWORDS 追加
+        if settings.legitimate_keywords_extra:
+            extra = set(s.strip() for s in settings.legitimate_keywords_extra.split(",") if s.strip())
+            mc.DEFAULT_LEGITIMATE_KEYWORDS = mc.DEFAULT_LEGITIMATE_KEYWORDS | extra
+
+        # INHERENTLY_MALICIOUS_PATTERNS 追加
+        if settings.inherently_malicious_extra:
+            extra = tuple(s.strip() for s in settings.inherently_malicious_extra.split(",") if s.strip())
+            ip_kw.INHERENTLY_MALICIOUS_PATTERNS = ip_kw.INHERENTLY_MALICIOUS_PATTERNS + extra
+
+        # VERY_STRONG_ATTACK_PATTERNS 追加
+        if settings.very_strong_attacks_extra:
+            extra = tuple(s.strip() for s in settings.very_strong_attacks_extra.split(",") if s.strip())
+            ip_kw.VERY_STRONG_ATTACK_PATTERNS = ip_kw.VERY_STRONG_ATTACK_PATTERNS + extra
+
+        # PROBE_PATH_PATTERNS 追加（编译为正则）
+        if settings.probe_path_patterns_extra:
+            import re
+            extra = tuple(re.compile(p.strip()) for p in settings.probe_path_patterns_extra.split(",") if p.strip())
+            ip_kw.PROBE_PATH_PATTERNS = ip_kw.PROBE_PATH_PATTERNS + extra
+
+        # OBVIOUS_POST_ONLY_SUFFIXES 追加
+        if settings.post_only_suffixes_extra:
+            extra = tuple(s.strip() for s in settings.post_only_suffixes_extra.split(",") if s.strip())
+            hp.OBVIOUS_POST_ONLY_SUFFIXES = hp.OBVIOUS_POST_ONLY_SUFFIXES + extra
+
+        # LOGIN_PATH_PREFIXES 追加
+        if settings.login_paths_extra:
+            extra = tuple(s.strip() for s in settings.login_paths_extra.split(",") if s.strip())
+            hp.LOGIN_PATH_PREFIXES = hp.LOGIN_PATH_PREFIXES + extra
+
         self.core_executor = ProcessPoolExecutor(
             max_workers=settings.core_process_pool_size,
             max_tasks_per_child=settings.max_tasks_per_child,
@@ -239,6 +284,8 @@ class AIWAFStreamEngine:
                     environ,
                     method=std_log.get("method", "GET"),
                     config_required_headers=required,
+                    max_header_bytes=self.settings.header_max_bytes,
+                    max_header_count=self.settings.header_max_count,
                     max_user_agent_length=self.settings.header_max_ua_length,
                     max_accept_length=self.settings.header_max_accept_length,
                     suspicious_user_agents=suspicious_ua,
@@ -269,7 +316,13 @@ class AIWAFStreamEngine:
                 # 只检查 36 字符且含 dash 的段（UUID 格式特征）
                 if len(seg) == 36 and seg.count('-') >= 4 and is_malformed_uuid(seg):
                     try:
-                        record_uuid_signal(ip, "malformed_uuid")
+                        record_uuid_signal(ip, "malformed_uuid", config={
+                            "block_threshold": self.settings.uuid_block_threshold,
+                            "malformed_weight": self.settings.uuid_malformed_weight,
+                            "not_found_weight": self.settings.uuid_not_found_weight,
+                            "success_decay": self.settings.uuid_success_decay,
+                            "window_seconds": self.settings.uuid_window_seconds,
+                        })
                         try:
                             await self._emit_alert(std_log, "UUIDTamper:malformed_uuid")
                         except Exception:
