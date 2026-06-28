@@ -128,22 +128,25 @@ class PathManifest:
     路径清单管理器（内存版本，可独立测试）。
 
     生产环境使用 RedisPathManifestStore 持久化。
+    线程安全：使用 threading.Lock 保护 _paths（process_log 和 _batch_dispatcher 并发访问）。
     """
 
     def __init__(self):
         self._paths: Dict[str, PathStats] = {}
+        self._lock = __import__('threading').Lock()
 
     def record(self, path: str, method: str, status_code: int, timestamp: float = None):
         """记录一条流量"""
         template = templify_path(path)
         ts = timestamp or time.time()
 
-        if template not in self._paths:
-            self._paths[template] = PathStats(template=template)
+        with self._lock:
+            if template not in self._paths:
+                self._paths[template] = PathStats(template=template)
 
-        stats = self._paths[template]
-        stats.total_count += 1
-        stats.methods.add(method.upper())
+            stats = self._paths[template]
+            stats.total_count += 1
+            stats.methods.add(method.upper())
         stats.last_seen = ts
 
         if 200 <= status_code < 300:
@@ -154,39 +157,44 @@ class PathManifest:
     def path_exists(self, path: str) -> bool:
         """判定路径是否为已知合法路径"""
         template = templify_path(path)
-        stats = self._paths.get(template)
-        return stats.is_known if stats else False
+        with self._lock:
+            stats = self._paths.get(template)
+            return stats.is_known if stats else False
 
     def get_stats(self, path: str) -> Optional[PathStats]:
         template = templify_path(path)
-        return self._paths.get(template)
+        with self._lock:
+            return self._paths.get(template)
 
     def get_all_templates(self) -> List[str]:
-        return list(self._paths.keys())
+        with self._lock:
+            return list(self._paths.keys())
 
     def cleanup(self, min_count: int = 2, max_age_seconds: int = 86400, now: float = None):
         """清理低频/过期路径（防膨胀）"""
         now = now or time.time()
-        to_remove = [
-            tpl for tpl, stats in self._paths.items()
-            if stats.total_count < min_count
-            or (now - stats.last_seen) > max_age_seconds
-        ]
-        for tpl in to_remove:
-            del self._paths[tpl]
+        with self._lock:
+            to_remove = [
+                tpl for tpl, stats in self._paths.items()
+                if stats.total_count < min_count
+                or (now - stats.last_seen) > max_age_seconds
+            ]
+            for tpl in to_remove:
+                del self._paths[tpl]
         return len(to_remove)
 
     def to_dict(self) -> Dict[str, dict]:
         """序列化为可 JSON 化的 dict"""
-        return {
-            tpl: {
-                "total": s.total_count,
-                "ok": s.ok_count,
-                "error": s.error_count,
-                "methods": sorted(s.methods),
-                "last_seen": s.last_seen,
-            }
-            for tpl, s in self._paths.items()
+        with self._lock:
+            return {
+                tpl: {
+                    "total": s.total_count,
+                    "ok": s.ok_count,
+                    "error": s.error_count,
+                    "methods": sorted(s.methods),
+                    "last_seen": s.last_seen,
+                }
+                for tpl, s in self._paths.items()
         }
 
     def from_dict(self, data: Dict[str, dict]):
