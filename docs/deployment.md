@@ -105,7 +105,7 @@ CMD ["python", "-c", "import asyncio; from aiwaf.stream.config import Settings; 
 
 ---
 
-## 3. 配置项详解（48 项）
+## 3. 配置项详解（72 项）
 
 ### 3.1 Redis
 
@@ -206,6 +206,43 @@ CMD ["python", "-c", "import asyncio; from aiwaf.stream.config import Settings; 
 | `keyword_min_segment_length` | `KEYWORD_MIN_SEGMENT_LENGTH` | `3` | 路径段最小长度 |
 | `background_sync_interval` | `BACKGROUND_SYNC_INTERVAL` | `5` | 同步间隔 |
 | `kafka_retry_interval` | `KAFKA_RETRY_INTERVAL` | `5` | Kafka 重试间隔 |
+
+### 3.11 预定义特征追加
+
+| YAML 字段 | 环境变量 | 默认值 | 说明 |
+|---|---|---|---|
+| `static_keywords_extra` | `STATIC_KEYWORDS_EXTRA` | `""` | 追加到 STATIC_KW |
+| `legitimate_keywords_extra` | `LEGITIMATE_KEYWORDS_EXTRA` | `""` | 追加到合法白名单 |
+| `inherently_malicious_extra` | `INHERENTLY_MALICIOUS_EXTRA` | `""` | 追加到固有恶意模式 |
+| `very_strong_attacks_extra` | `VERY_STRONG_ATTACKS_EXTRA` | `""` | 追加到强力攻击模式 |
+| `probe_path_patterns_extra` | `PROBE_PATH_PATTERNS_EXTRA` | `""` | 追加到探测路径正则 |
+| `post_only_suffixes_extra` | `POST_ONLY_SUFFIXES_EXTRA` | `""` | 追加到 POST-only 后缀 |
+| `login_paths_extra` | `LOGIN_PATHS_EXTRA` | `""` | 追加到登录路径前缀 |
+| `header_max_bytes` | `HEADER_MAX_BYTES` | `32768` | Header 最大字节数 |
+| `header_max_count` | `HEADER_MAX_COUNT` | `100` | Header 最大数量 |
+
+### 3.12 UUID 篡改评分
+
+| YAML 字段 | 环境变量 | 默认值 | 说明 |
+|---|---|---|---|
+| `uuid_block_threshold` | `UUID_BLOCK_THRESHOLD` | `5` | 拦截阈值 |
+| `uuid_malformed_weight` | `UUID_MALFORMED_WEIGHT` | `5` | malformed 权重 |
+| `uuid_not_found_weight` | `UUID_NOT_FOUND_WEIGHT` | `1` | 不存在权重 |
+| `uuid_success_decay` | `UUID_SUCCESS_DECAY` | `2` | 成功衰减 |
+| `uuid_window_seconds` | `UUID_WINDOW_SECONDS` | `60` | 评分窗口（秒） |
+
+### 3.13 检测模式全局开关
+
+| YAML 字段 | 环境变量 | 默认值 | 说明 |
+|---|---|---|---|
+| `detection_header_enabled` | `DETECTION_HEADER_ENABLED` | `true` | 请求头验证 |
+| `detection_uuid_enabled` | `DETECTION_UUID_ENABLED` | `true` | UUID 篡改检测 |
+| `detection_geo_enabled` | `DETECTION_GEO_ENABLED` | `true` | 地理围栏 |
+| `detection_rate_limit_enabled` | `DETECTION_RATE_LIMIT_ENABLED` | `true` | 速率限制 |
+| `detection_keyword_enabled` | `DETECTION_KEYWORD_ENABLED` | `true` | 关键词策略检测 |
+| `detection_fail_secure_enabled` | `DETECTION_FAIL_SECURE_ENABLED` | `true` | Fail-Secure 降级 |
+| `detection_method_enabled` | `DETECTION_METHOD_ENABLED` | `true` | HTTP 方法验证 |
+| `path_rules` | `PATH_RULES` | `""` | 按路径禁用检测（JSON） |
 
 ---
 
