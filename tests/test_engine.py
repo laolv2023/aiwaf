@@ -79,6 +79,13 @@ class MockSettings:
     detection_keyword_enabled: bool = True
     detection_fail_secure_enabled: bool = True
     detection_method_enabled: bool = True
+    static_keywords_replace_mode: bool = False
+    legitimate_keywords_replace_mode: bool = False
+    inherently_malicious_replace_mode: bool = False
+    very_strong_attacks_replace_mode: bool = False
+    probe_path_patterns_replace_mode: bool = False
+    post_only_suffixes_replace_mode: bool = False
+    login_paths_replace_mode: bool = False
 
 
 class MockStateMgr:
