@@ -10,7 +10,7 @@ import sys
 import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from preprocessor import generate_deterministic_trace_id, transform_raw_log, MAX_BODY_STORE_BYTES
+from aiwaf.stream.preprocessor import generate_deterministic_trace_id, transform_raw_log, MAX_BODY_STORE_BYTES
 
 
 # ============================================================
