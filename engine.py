@@ -2,6 +2,7 @@
 AIWAF-Stream 异步流式检测引擎
 """
 import asyncio
+import ipaddress
 import time
 import orjson
 import asyncbreaker
@@ -385,7 +386,6 @@ class AIWAFStreamEngine:
         skip_ips = [s.strip() for s in self.settings.header_skip_ips.split(",") if s.strip()]
         if skip_ips:
             try:
-                import ipaddress
                 addr = ipaddress.ip_address(ip)
                 for cidr in skip_ips:
                     if addr in ipaddress.ip_network(cidr, strict=False):
@@ -466,7 +466,7 @@ class AIWAFStreamEngine:
             except Exception:
                 # 消费循环异常（如 Kafka rebalance），等待后重试
                 try:
-                    await asyncio.sleep(self.settings.circuit_breaker_timeout)
+                    await asyncio.sleep(self.settings.kafka_retry_interval)
                 except asyncio.CancelledError:
                     break
 
