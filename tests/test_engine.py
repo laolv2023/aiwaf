@@ -58,6 +58,20 @@ class MockSettings:
     auto_block_enabled: bool = True
     auto_learn_keywords: bool = True
     path_rules: str = ""
+    static_keywords_extra: str = ""
+    legitimate_keywords_extra: str = ""
+    inherently_malicious_extra: str = ""
+    very_strong_attacks_extra: str = ""
+    probe_path_patterns_extra: str = ""
+    post_only_suffixes_extra: str = ""
+    login_paths_extra: str = ""
+    header_max_bytes: int = 32768
+    header_max_count: int = 100
+    uuid_block_threshold: int = 5
+    uuid_malformed_weight: int = 5
+    uuid_not_found_weight: int = 1
+    uuid_success_decay: int = 2
+    uuid_window_seconds: int = 60
 
 
 class MockStateMgr:
