@@ -463,6 +463,13 @@ class MockSettings:
     uuid_not_found_weight: int = 1
     uuid_success_decay: int = 2
     uuid_window_seconds: int = 60
+    detection_header_enabled: bool = True
+    detection_uuid_enabled: bool = True
+    detection_geo_enabled: bool = True
+    detection_rate_limit_enabled: bool = True
+    detection_keyword_enabled: bool = True
+    detection_fail_secure_enabled: bool = True
+    detection_method_enabled: bool = True
 
 
 class MockStateMgr:
