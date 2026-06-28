@@ -15,8 +15,8 @@ from aiokafka import AIOKafkaConsumer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from akto_adapter import parse_akto_json_message
-from preprocessor import transform_raw_log
+from aiwaf.stream.akto_adapter import parse_akto_json_message
+from aiwaf.stream.preprocessor import transform_raw_log
 
 
 async def verify():
