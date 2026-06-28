@@ -132,7 +132,10 @@ class AIWAFStreamEngine:
                 batch_results = await loop.run_in_executor(
                     self.core_executor, run_core_logic_batch_isolated,
                     batch_logs, batch_ts, batch_et, current_kws,
-                    (), None, None, (), None, 150, True, known_paths
+                    (), None, None, (), None,
+                    self.settings.rate_limit_flood_threshold, True, known_paths,
+                    self.settings.rate_limit_window,
+                    self.settings.rate_limit_max_requests,
                 )
                 if len(batch_results) != len(batch_futures):
                     min_len = min(len(batch_futures), len(batch_results))
@@ -178,7 +181,11 @@ class AIWAFStreamEngine:
         try:
             if await self.facade.is_duplicate_and_add(trace_id, is_retry, retry_count):
                 return
-            timestamps = await self.facade.get_and_update_rate_limit(ip, event_time, 60, 100)
+            timestamps = await self.facade.get_and_update_rate_limit(
+                ip, event_time,
+                self.settings.rate_limit_window,
+                self.settings.rate_limit_max_requests,
+            )
         except asyncbreaker.CircuitBreakerError:
             redis_available = False
 
@@ -191,7 +198,7 @@ class AIWAFStreamEngine:
                 return
 
             local_rate_limit[ip] = local_rate_limit.get(ip, 0) + 1
-            if local_rate_limit[ip] > 50:
+            if local_rate_limit[ip] > self.settings.fail_secure_local_limit:
                 local_blacklist[ip] = True
                 _backup_buffer.append(ip)
                 try:
