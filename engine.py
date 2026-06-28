@@ -26,6 +26,7 @@ from aiwaf.core.header_validation import evaluate_header_policy
 from aiwaf.core.uuid_tamper import record_uuid_signal, is_malformed_uuid, collect_uuid_model_fields
 from aiwaf.core.geo_policy import evaluate_geo_policy
 from aiwaf.core.geoip import lookup_country_name, GEOIP_AVAILABLE
+from config_override import ConfigOverride
 
 METRIC_ENGINE_IN = Counter('aiwaf_engine_in_total', 'Logs received')
 METRIC_DLQ_OUT = Counter('aiwaf_dlq_out_total', 'Messages routed to DLQ')
@@ -66,6 +67,7 @@ class AIWAFStreamEngine:
         self._cancel_event = asyncio.Event()
         self.consumer = None
         self.path_manifest = PathManifest()
+        self.config_override = ConfigOverride(self.facade)
 
     async def start(self):
         await self.producer.start()
@@ -147,13 +149,15 @@ class AIWAFStreamEngine:
                 loop = asyncio.get_running_loop()
                 # 传入已知路径模板集（用于 path_exists 判定）
                 known_paths = self.path_manifest.get_all_templates()
+                flood_threshold = await self.config_override.get_async("rate_limit_flood_threshold", self.settings.rate_limit_flood_threshold)
+                rl_window = await self.config_override.get_async("rate_limit_window", self.settings.rate_limit_window)
+                rl_max_req = await self.config_override.get_async("rate_limit_max_requests", self.settings.rate_limit_max_requests)
                 batch_results = await loop.run_in_executor(
                     self.core_executor, run_core_logic_batch_isolated,
                     batch_logs, batch_ts, batch_et, current_kws,
                     (), None, None, (), None,
-                    self.settings.rate_limit_flood_threshold, True, known_paths,
-                    self.settings.rate_limit_window,
-                    self.settings.rate_limit_max_requests,
+                    flood_threshold, True, known_paths,
+                    rl_window, rl_max_req,
                 )
                 if len(batch_results) != len(batch_futures):
                     min_len = min(len(batch_futures), len(batch_results))
@@ -198,7 +202,9 @@ class AIWAFStreamEngine:
         # ── 请求头验证 ──
         # 跳过豁免 IP（支持 CIDR）
         raw_headers = std_log.get("request_headers", "")
-        if raw_headers and self._should_check_header(ip, uri_path):
+        header_skip_ips = await self.config_override.get_async("header_skip_ips", self.settings.header_skip_ips)
+        header_skip_paths = await self.config_override.get_async("header_skip_paths", self.settings.header_skip_paths)
+        if raw_headers and self._should_check_header(ip, uri_path, header_skip_ips, header_skip_paths):
             try:
                 headers_dict = orjson.loads(raw_headers) if isinstance(raw_headers, str) else raw_headers
                 # 转为 WSGI environ 格式（evaluate_header_policy 期望的输入）
@@ -283,8 +289,8 @@ class AIWAFStreamEngine:
                 return
             timestamps = await self.facade.get_and_update_rate_limit(
                 ip, event_time,
-                self.settings.rate_limit_window,
-                self.settings.rate_limit_max_requests,
+                await self.config_override.get_async("rate_limit_window", self.settings.rate_limit_window),
+                await self.config_override.get_async("rate_limit_max_requests", self.settings.rate_limit_max_requests),
             )
         except asyncbreaker.CircuitBreakerError:
             redis_available = False
@@ -298,8 +304,10 @@ class AIWAFStreamEngine:
                 return
 
             local_rate_limit[ip] = local_rate_limit.get(ip, 0) + 1
-            if local_rate_limit[ip] > self.settings.fail_secure_local_limit:
-                if self.settings.auto_block_enabled:
+            fail_secure_limit = await self.config_override.get_async("fail_secure_local_limit", self.settings.fail_secure_local_limit)
+            if local_rate_limit[ip] > fail_secure_limit:
+                auto_block = await self.config_override.get_async("auto_block_enabled", self.settings.auto_block_enabled)
+                if auto_block:
                     local_blacklist[ip] = True
                     _backup_buffer.append(ip)
                 try:
@@ -325,7 +333,8 @@ class AIWAFStreamEngine:
             return
 
         if isinstance(result, ItemErrorResult):
-            if redis_available and self.settings.auto_block_enabled and result.side_effects.get('blocked_ips'):
+            auto_block = await self.config_override.get_async("auto_block_enabled", self.settings.auto_block_enabled)
+            if redis_available and auto_block and result.side_effects.get('blocked_ips'):
                 asyncio.create_task(self.facade.batch_block_ips(result.side_effects.get('blocked_ips', [])))
             try:
                 await self._route_to_dlq(std_log, Exception(f"{result.error_type}: {result.error_msg}"))
@@ -334,9 +343,11 @@ class AIWAFStreamEngine:
             return
 
         if redis_available:
-            if self.settings.auto_block_enabled and result.side_effects.get('blocked_ips'):
+            auto_block = await self.config_override.get_async("auto_block_enabled", self.settings.auto_block_enabled)
+            auto_learn = await self.config_override.get_async("auto_learn_keywords", self.settings.auto_learn_keywords)
+            if auto_block and result.side_effects.get('blocked_ips'):
                 asyncio.create_task(self.facade.batch_block_ips(result.side_effects.get('blocked_ips', [])))
-            if self.settings.auto_learn_keywords and result.side_effects.get('learned_keywords'):
+            if auto_learn and result.side_effects.get('learned_keywords'):
                 asyncio.create_task(self._batch_add_keywords(result.side_effects.get('learned_keywords', [])))
 
         if result.rl_decision.action == FLOOD_BLOCK:
@@ -387,24 +398,23 @@ class AIWAFStreamEngine:
         except Exception:
             pass
 
-    def _should_check_header(self, ip: str, path: str) -> bool:
+    def _should_check_header(self, ip: str, path: str, skip_ips: str, skip_paths: str) -> bool:
         """判断是否需要对该 IP/路径进行请求头检查"""
         # 检查豁免 IP（支持 CIDR）
-        skip_ips = [s.strip() for s in self.settings.header_skip_ips.split(",") if s.strip()]
-        if skip_ips:
+        skip_ip_list = [s.strip() for s in skip_ips.split(",") if s.strip()]
+        if skip_ip_list:
             try:
                 addr = ipaddress.ip_address(ip)
-                for cidr in skip_ips:
+                for cidr in skip_ip_list:
                     if addr in ipaddress.ip_network(cidr, strict=False):
                         return False
             except (ValueError, OSError):
-                # IP 解析失败或 CIDR 格式错误，按精确匹配
-                if ip in skip_ips:
+                if ip in skip_ip_list:
                     return False
 
         # 检查豁免路径前缀
-        skip_paths = [s.strip() for s in self.settings.header_skip_paths.split(",") if s.strip()]
-        for prefix in skip_paths:
+        skip_path_list = [s.strip() for s in skip_paths.split(",") if s.strip()]
+        for prefix in skip_path_list:
             if path.startswith(prefix):
                 return False
 
