@@ -1,6 +1,6 @@
 # AIWAF-Stream 测试文档
 
-> 版本: 1.0 | 测试用例总数: 500 | 最后更新: 2026-06-05
+> 版本: 2.0 | 测试用例总数: 427 | 最后更新: 2026-06-28
 
 ---
 
@@ -224,10 +224,10 @@ engine.producer = AsyncMock()
 |------|--------|------|
 | preprocessor | 99 | ✅ 100% pass |
 | acl_bootstrap | 100 | ✅ 100% pass |
-| redis_facade | 103 | ✅ 100% pass |
-| engine | 118 | ✅ 100% pass |
-| train_pipeline | 80 | ✅ 100% pass |
-| **合计** | **500** | **0 fail / 0 error / 0 skip** |
+| akto_adapter | 14 | ✅ 100% pass |
+| akto_integration | 114 | ✅ 100% pass |
+| full_integration | 100 | ✅ 100% pass |
+| **合计** | **427** | **0 fail / 0 error / 0 skip** |
 
 ---
 
