@@ -124,6 +124,26 @@ class Settings:
     # 示例: [{"path": "/api/webhooks/", "disable": ["header_validation", "uuid_tamper"]}]
     path_rules: str = ""
 
+    # 预定义特征追加配置（逗号分隔，追加到默认列表，不替换）
+    static_keywords_extra: str = ""              # 追加到 STATIC_KW
+    legitimate_keywords_extra: str = ""          # 追加到 DEFAULT_LEGITIMATE_KEYWORDS
+    inherently_malicious_extra: str = ""         # 追加到 INHERENTLY_MALICIOUS_PATTERNS
+    very_strong_attacks_extra: str = ""          # 追加到 VERY_STRONG_ATTACK_PATTERNS
+    probe_path_patterns_extra: str = ""          # 追加到 PROBE_PATH_PATTERNS（正则）
+    post_only_suffixes_extra: str = ""           # 追加到 OBVIOUS_POST_ONLY_SUFFIXES
+    login_paths_extra: str = ""                  # 追加到 LOGIN_PATH_PREFIXES
+
+    # 请求头参数（已有部分，补充剩余）
+    header_max_bytes: int = 32768                # Header 最大字节数
+    header_max_count: int = 100                  # Header 最大数量
+
+    # UUID 篡改评分参数
+    uuid_block_threshold: int = 5                # 拦截阈值
+    uuid_malformed_weight: int = 5               # malformed UUID 权重
+    uuid_not_found_weight: int = 1               # UUID 不存在权重
+    uuid_success_decay: int = 2                  # 成功衰减
+    uuid_window_seconds: int = 60                # 评分窗口（秒）
+
     @classmethod
     def from_yaml(cls, path: str) -> "Settings":
         """从 YAML 配置文件加载"""
@@ -209,6 +229,20 @@ class Settings:
             "auto_block_enabled":          "AUTO_BLOCK_ENABLED",
             "auto_learn_keywords":         "AUTO_LEARN_KEYWORDS",
             "path_rules":                  "PATH_RULES",
+            "static_keywords_extra":       "STATIC_KEYWORDS_EXTRA",
+            "legitimate_keywords_extra":   "LEGITIMATE_KEYWORDS_EXTRA",
+            "inherently_malicious_extra":  "INHERENTLY_MALICIOUS_EXTRA",
+            "very_strong_attacks_extra":   "VERY_STRONG_ATTACKS_EXTRA",
+            "probe_path_patterns_extra":   "PROBE_PATH_PATTERNS_EXTRA",
+            "post_only_suffixes_extra":    "POST_ONLY_SUFFIXES_EXTRA",
+            "login_paths_extra":           "LOGIN_PATHS_EXTRA",
+            "header_max_bytes":            "HEADER_MAX_BYTES",
+            "header_max_count":            "HEADER_MAX_COUNT",
+            "uuid_block_threshold":        "UUID_BLOCK_THRESHOLD",
+            "uuid_malformed_weight":       "UUID_MALFORMED_WEIGHT",
+            "uuid_not_found_weight":       "UUID_NOT_FOUND_WEIGHT",
+            "uuid_success_decay":          "UUID_SUCCESS_DECAY",
+            "uuid_window_seconds":         "UUID_WINDOW_SECONDS",
         }
 
         int_fields = {
@@ -226,6 +260,9 @@ class Settings:
             "honeypot_ttl", "keyword_min_segment_length",
             "background_sync_interval",
             "kafka_retry_interval",
+            "header_max_bytes", "header_max_count",
+            "uuid_block_threshold", "uuid_malformed_weight",
+            "uuid_not_found_weight", "uuid_success_decay", "uuid_window_seconds",
         }
 
         float_fields = {
