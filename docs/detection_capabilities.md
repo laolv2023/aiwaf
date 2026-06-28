@@ -832,6 +832,6 @@ return "LOW"
 
 ## 配置项汇总
 
-全部 72 项配置项，支持 YAML 文件 + 环境变量 + Redis 运行时覆盖（25 项可覆盖）。
+全部 79 项配置项，支持 YAML 文件 + 环境变量 + Redis 运行时覆盖（25 项可覆盖）。
 
 详见 `config.example.yaml`。
