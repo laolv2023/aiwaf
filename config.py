@@ -52,6 +52,43 @@ class Settings:
     geo_block_countries: str = ""         # 阻止的国家（逗号分隔）
     geo_allow_countries: str = ""         # 允许的国家（逗号分隔，空=全部允许）
 
+    # Kafka Producer
+    kafka_enable_idempotence: bool = True  # 幂等生产者
+    kafka_acks: str = "all"                # 确认级别（all/1/0）
+
+    # Kafka Consumer
+    kafka_auto_offset_reset: str = "earliest"  # 无偏移时从最早开始
+    kafka_max_poll_records: int = 500          # 单次拉取最大记录数
+
+    # 进程池
+    max_tasks_per_child: int = 200         # 子进程最大任务数（防内存泄漏）
+
+    # 微批处理
+    batch_max_size: int = 50               # 每批最大消息数
+    batch_timeout_ms: int = 10             # 批处理超时（毫秒）
+    batch_queue_maxsize: int = 10000       # 批处理队列最大长度
+
+    # 关键词刷新
+    keyword_refresh_interval: int = 10     # 关键词缓存刷新间隔（秒）
+    keyword_top_n: int = 500               # 从 Redis 获取的 Top N 关键词数
+
+    # Redis TTL
+    dedup_ttl: int = 86400                 # 去重记录 TTL（秒，默认 24 小时）
+    blacklist_ttl: int = 3600              # IP 黑名单 TTL（秒，默认 1 小时）
+    local_blacklist_ttl: int = 300         # 本地黑名单 TTL（秒，默认 5 分钟）
+    local_rate_limit_ttl: int = 60         # 本地速率限制 TTL（秒）
+
+    # 熔断器
+    circuit_breaker_fail_max: int = 5      # 连续失败多少次跳闸
+    circuit_breaker_timeout: int = 60      # 熔断器恢复探测间隔（秒）
+
+    # Fail-Secure 缓冲
+    max_pending_ips: int = 10000           # 待同步 IP 缓冲最大长度
+
+    # Body 截断
+    max_body_hash_bytes: int = 10485760    # Body 哈希截断阈值（字节，默认 10MB）
+    max_body_store_bytes: int = 1024       # Body 存储截断阈值（字节，默认 1KB）
+
     @classmethod
     def from_yaml(cls, path: str) -> "Settings":
         """从 YAML 配置文件加载"""
@@ -86,26 +123,55 @@ class Settings:
 
         # Step 2: 环境变量覆盖 YAML（优先级更高）
         env_map = {
-            "redis_cluster_url":       "REDIS_CLUSTER_URL",
-            "kafka_brokers":           "KAFKA_BROKERS",
-            "input_topic":             "KAFKA_INPUT_TOPIC",
-            "alert_topic":             "KAFKA_ALERT_TOPIC",
-            "dlq_topic":               "KAFKA_DLQ_TOPIC",
-            "consumer_group":          "KAFKA_CONSUMER_GROUP",
-            "core_process_pool_size":  "CORE_PROCESS_POOL_SIZE",
-            "rate_limit_window":       "RATE_LIMIT_WINDOW",
-            "rate_limit_max_requests": "RATE_LIMIT_MAX_REQUESTS",
-            "rate_limit_flood_threshold": "RATE_LIMIT_FLOOD_THRESHOLD",
-            "fail_secure_local_limit": "FAIL_SECURE_LOCAL_LIMIT",
-            "geoip_db_path":           "GEOIP_DB_PATH",
-            "geo_block_countries":     "GEO_BLOCK_COUNTRIES",
-            "geo_allow_countries":     "GEO_ALLOW_COUNTRIES",
+            "redis_cluster_url":           "REDIS_CLUSTER_URL",
+            "kafka_brokers":               "KAFKA_BROKERS",
+            "input_topic":                 "KAFKA_INPUT_TOPIC",
+            "alert_topic":                 "KAFKA_ALERT_TOPIC",
+            "dlq_topic":                   "KAFKA_DLQ_TOPIC",
+            "consumer_group":              "KAFKA_CONSUMER_GROUP",
+            "core_process_pool_size":      "CORE_PROCESS_POOL_SIZE",
+            "rate_limit_window":           "RATE_LIMIT_WINDOW",
+            "rate_limit_max_requests":     "RATE_LIMIT_MAX_REQUESTS",
+            "rate_limit_flood_threshold":  "RATE_LIMIT_FLOOD_THRESHOLD",
+            "fail_secure_local_limit":     "FAIL_SECURE_LOCAL_LIMIT",
+            "geoip_db_path":               "GEOIP_DB_PATH",
+            "geo_block_countries":         "GEO_BLOCK_COUNTRIES",
+            "geo_allow_countries":         "GEO_ALLOW_COUNTRIES",
+            "kafka_enable_idempotence":    "KAFKA_ENABLE_IDEMPOTENCE",
+            "kafka_acks":                  "KAFKA_ACKS",
+            "kafka_auto_offset_reset":     "KAFKA_AUTO_OFFSET_RESET",
+            "kafka_max_poll_records":      "KAFKA_MAX_POLL_RECORDS",
+            "max_tasks_per_child":         "MAX_TASKS_PER_CHILD",
+            "batch_max_size":              "BATCH_MAX_SIZE",
+            "batch_timeout_ms":            "BATCH_TIMEOUT_MS",
+            "batch_queue_maxsize":         "BATCH_QUEUE_MAXSIZE",
+            "keyword_refresh_interval":    "KEYWORD_REFRESH_INTERVAL",
+            "keyword_top_n":               "KEYWORD_TOP_N",
+            "dedup_ttl":                   "DEDUP_TTL",
+            "blacklist_ttl":               "BLACKLIST_TTL",
+            "local_blacklist_ttl":         "LOCAL_BLACKLIST_TTL",
+            "local_rate_limit_ttl":        "LOCAL_RATE_LIMIT_TTL",
+            "circuit_breaker_fail_max":    "CIRCUIT_BREAKER_FAIL_MAX",
+            "circuit_breaker_timeout":     "CIRCUIT_BREAKER_TIMEOUT",
+            "max_pending_ips":             "MAX_PENDING_IPS",
+            "max_body_hash_bytes":         "MAX_BODY_HASH_BYTES",
+            "max_body_store_bytes":        "MAX_BODY_STORE_BYTES",
         }
 
         int_fields = {
             "core_process_pool_size", "rate_limit_window",
             "rate_limit_max_requests", "rate_limit_flood_threshold",
             "fail_secure_local_limit",
+            "kafka_max_poll_records", "max_tasks_per_child",
+            "batch_max_size", "batch_timeout_ms", "batch_queue_maxsize",
+            "keyword_refresh_interval", "keyword_top_n",
+            "dedup_ttl", "blacklist_ttl", "local_blacklist_ttl", "local_rate_limit_ttl",
+            "circuit_breaker_fail_max", "circuit_breaker_timeout",
+            "max_pending_ips", "max_body_hash_bytes", "max_body_store_bytes",
+        }
+
+        bool_fields = {
+            "kafka_enable_idempotence",
         }
 
         for attr, env_key in env_map.items():
@@ -113,6 +179,8 @@ class Settings:
             if val is not None:
                 if attr in int_fields:
                     val = int(val)
+                elif attr in bool_fields:
+                    val = val.lower() in ("true", "1", "yes", "on")
                 setattr(settings, attr, val)
 
         return settings
