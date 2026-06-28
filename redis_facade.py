@@ -120,16 +120,22 @@ async def background_sync_worker(state_mgr: RedisClusterStateManager, cancel_eve
         if not _current_buffer:
             continue
 
+        # 交换 buffer：_current_buffer 变为 _backup_buffer（供后续写入）
+        # _backup_buffer 变为 _current_buffer（待同步的旧数据）
         _current_buffer, _backup_buffer = _backup_buffer, _current_buffer
-        ips_to_sync = list(_current_buffer)
-        sync_count = len(ips_to_sync)
+        # 此时 _backup_buffer 包含待同步的数据
+        ips_to_sync = list(_backup_buffer)
 
         try:
             await state_mgr.batch_block_ips([(ip, "Local_FailSecure") for ip in ips_to_sync])
-            for _ in range(sync_count):
-                _current_buffer.popleft()
+            # 同步成功，清空 _backup_buffer
+            _backup_buffer.clear()
         except Exception:
-            if len(_current_buffer) >= MAX_PENDING_IPS:
+            # 同步失败，数据保留在 _backup_buffer 中，下次再试
+            # 同时将 _current_buffer 的数据也合并过来
+            while _current_buffer:
+                _backup_buffer.append(_current_buffer.popleft())
+            if len(_backup_buffer) >= MAX_PENDING_IPS:
                 METRIC_PENDING_OVERFLOW.inc()
 
 
