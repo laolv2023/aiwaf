@@ -102,6 +102,8 @@ def run_core_logic_batch_isolated(
     flood_threshold: int = 150,
     keyword_learning_enabled: bool = True,
     known_path_templates: set = None,
+    rate_limit_window: int = 60,
+    rate_limit_max_requests: int = 100,
 ) -> List[Any]:
     """子进程批量执行入口，逐条容错"""
     if legitimate_keywords is None:
@@ -122,8 +124,8 @@ def run_core_logic_batch_isolated(
             rl_dec = evaluate_rate_limit(
                 timestamps=batch_timestamps[i],
                 now=batch_event_times[i],
-                window_seconds=60,
-                max_requests=100,
+                window_seconds=rate_limit_window,
+                max_requests=rate_limit_max_requests,
                 flood_threshold=flood_threshold,
             )
 
