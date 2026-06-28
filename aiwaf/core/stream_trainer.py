@@ -56,7 +56,7 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-MIN_AI_LOGS = 50  # 最小训练样本数
+MIN_AI_LOGS = 50  # 默认最小训练样本数（可通过参数覆盖）
 
 
 def train_from_records(
@@ -69,6 +69,7 @@ def train_from_records(
     contamination: float = 0.05,
     n_estimators: int = 100,
     max_samples: str = "auto",
+    min_ai_logs: int = MIN_AI_LOGS,
     model_save_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
@@ -177,8 +178,8 @@ def train_from_records(
             logger.info(f"Learned {len(learned)} suspicious keywords: {learned[:10]}")
 
     # ── AI 模型训练 ──
-    if not disable_ai and not force_ai and parsed_count < MIN_AI_LOGS:
-        logger.info(f"AI training skipped: {parsed_count} records < {MIN_AI_LOGS}. Falling back to keyword-only.")
+    if not disable_ai and not force_ai and parsed_count < min_ai_logs:
+        logger.info(f"AI training skipped: {parsed_count} records < {min_ai_logs}. Falling back to keyword-only.")
         disable_ai = True
 
     if not disable_ai:
