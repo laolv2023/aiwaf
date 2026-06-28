@@ -161,7 +161,7 @@ def train_from_records(
                     if (len(seg) > 3
                             and seg not in STATIC_KW
                             and seg not in legitimate_keywords
-                            and is_malicious_context(seg)):
+                            and is_malicious_context(path, seg, status, STATIC_KW)):
                         tokens[seg] += 1
                         if len(token_example_paths[seg]) < 5:
                             token_example_paths[seg].append(path)
