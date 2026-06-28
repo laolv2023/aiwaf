@@ -7,6 +7,11 @@ from typing import List, Tuple, Any
 
 from aiwaf.core.rate_limit import evaluate_rate_limit
 from aiwaf.core.ip_keyword import evaluate_keyword_policy
+from aiwaf.core.malicious_context import (
+    is_malicious_context as _real_is_malicious_context,
+    STATIC_KW,
+    DEFAULT_LEGITIMATE_KEYWORDS,
+)
 
 
 @dataclass
@@ -57,9 +62,23 @@ _collector = ProcessLocalCollector()
 _local_model = None
 
 
-def _default_malicious_context(seg: str) -> bool:
-    """默认恶意上下文判定：生产环境替换为 ML 模型。"""
-    return False
+def _make_is_malicious_context(status_code: int):
+    """
+    创建闭包形式的 is_malicious_context 判定函数。
+
+    移植自 aiwaf/core/training_logic.py:is_malicious_context，
+    适配流式版本（无 Django path_exists，使用 status_code 判定）。
+    """
+    def _is_malicious_context(seg: str) -> bool:
+        # seg 是 URL 路径段，但判定需要完整 path
+        # 在子进程中无法获取完整 request 对象，使用 seg + STATIC_KW 判定
+        return _real_is_malicious_context(
+            path=seg,
+            keyword=seg,
+            status=status_code,
+            static_keywords=STATIC_KW,
+        )
+    return _is_malicious_context
 
 
 def init_worker(model_path: str):
@@ -84,11 +103,11 @@ def run_core_logic_batch_isolated(
 ) -> List[Any]:
     """子进程批量执行入口，逐条容错"""
     if legitimate_keywords is None:
-        legitimate_keywords = set()
+        legitimate_keywords = DEFAULT_LEGITIMATE_KEYWORDS
     if exempt_keywords is None:
         exempt_keywords = set()
     if malicious_keywords is None:
-        malicious_keywords = set()
+        malicious_keywords = set(STATIC_KW)
 
     batch_results = []
     for i, log_json in enumerate(batch_logs_json):
@@ -105,18 +124,33 @@ def run_core_logic_batch_isolated(
                 max_requests=100,
                 flood_threshold=flood_threshold,
             )
+
+            # 获取 status_code 用于恶意上下文判定
+            status_code = std_log.get("status_code", 0)
+            uri_path = std_log.get("uri_path", "")
+
+            # 构建基于当前请求的 is_malicious_context 闭包
+            # 使用完整 uri_path 进行判定（而非单独的 seg）
+            def _ctx_fn(seg: str, _path=uri_path, _status=status_code) -> bool:
+                return _real_is_malicious_context(
+                    path=_path,
+                    keyword=seg,
+                    status=_status,
+                    static_keywords=STATIC_KW,
+                )
+
             kw_dec = evaluate_keyword_policy(
-                path=std_log["uri_path"],
+                path=uri_path,
                 query_keys=std_log.get("query_keys", []),
                 path_exists=False,
                 keyword_learning_enabled=keyword_learning_enabled,
-                static_keywords=static_keywords,
+                static_keywords=STATIC_KW,
                 dynamic_keywords=dynamic_kws,
                 legitimate_keywords=legitimate_keywords,
                 exempt_keywords=exempt_keywords,
                 safe_prefixes=safe_prefixes,
                 malicious_keywords=malicious_keywords,
-                is_malicious_context=_default_malicious_context,
+                is_malicious_context=_ctx_fn,
             )
 
             # 先提取副作用到局部变量，再构造 Result
