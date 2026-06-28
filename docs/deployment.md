@@ -105,7 +105,7 @@ CMD ["python", "-c", "import asyncio; from aiwaf.stream.config import Settings; 
 
 ---
 
-## 3. 配置项详解（72 项）
+## 3. 配置项详解（79 项）
 
 ### 3.1 Redis
 
@@ -221,7 +221,19 @@ CMD ["python", "-c", "import asyncio; from aiwaf.stream.config import Settings; 
 | `header_max_bytes` | `HEADER_MAX_BYTES` | `32768` | Header 最大字节数 |
 | `header_max_count` | `HEADER_MAX_COUNT` | `100` | Header 最大数量 |
 
-### 3.12 UUID 篡改评分
+### 3.12 预定义特征替换模式
+
+| YAML 字段 | 环境变量 | 默认值 | 说明 |
+|---|---|---|---|
+| `static_keywords_replace_mode` | `STATIC_KEYWORDS_REPLACE_MODE` | `false` | 替换 STATIC_KW（false=追加） |
+| `legitimate_keywords_replace_mode` | `LEGITIMATE_KEYWORDS_REPLACE_MODE` | `false` | 替换合法白名单 |
+| `inherently_malicious_replace_mode` | `INHERENTLY_MALICIOUS_REPLACE_MODE` | `false` | 替换固有恶意模式 |
+| `very_strong_attacks_replace_mode` | `VERY_STRONG_ATTACKS_REPLACE_MODE` | `false` | 替换强力攻击模式 |
+| `probe_path_patterns_replace_mode` | `PROBE_PATH_PATTERNS_REPLACE_MODE` | `false` | 替换探测路径正则 |
+| `post_only_suffixes_replace_mode` | `POST_ONLY_SUFFIXES_REPLACE_MODE` | `false` | 替换 POST-only 后缀 |
+| `login_paths_replace_mode` | `LOGIN_PATHS_REPLACE_MODE` | `false` | 替换登录路径前缀 |
+
+### 3.13 UUID 篡改评分
 
 | YAML 字段 | 环境变量 | 默认值 | 说明 |
 |---|---|---|---|
@@ -231,7 +243,7 @@ CMD ["python", "-c", "import asyncio; from aiwaf.stream.config import Settings; 
 | `uuid_success_decay` | `UUID_SUCCESS_DECAY` | `2` | 成功衰减 |
 | `uuid_window_seconds` | `UUID_WINDOW_SECONDS` | `60` | 评分窗口（秒） |
 
-### 3.13 检测模式全局开关
+### 3.14 检测模式全局开关
 
 | YAML 字段 | 环境变量 | 默认值 | 说明 |
 |---|---|---|---|
