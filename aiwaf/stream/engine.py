@@ -26,6 +26,7 @@ from aiwaf.core.header_validation import evaluate_header_policy
 from aiwaf.core.uuid_tamper import record_uuid_signal, is_malformed_uuid, collect_uuid_model_fields
 from aiwaf.core.geo_policy import evaluate_geo_policy
 from aiwaf.core.geoip import lookup_country_name, GEOIP_AVAILABLE
+from aiwaf.core.exemptions import should_apply_middleware_for_path
 from aiwaf.stream.config_override import ConfigOverride
 
 METRIC_ENGINE_IN = Counter('aiwaf_engine_in_total', 'Logs received')
@@ -68,6 +69,18 @@ class AIWAFStreamEngine:
         self.consumer = None
         self.path_manifest = PathManifest()
         self.config_override = ConfigOverride(self.facade)
+        self._path_rules = self._parse_path_rules(settings.path_rules)
+
+    def _parse_path_rules(self, rules_str: str) -> list:
+        """解析 path_rules JSON 字符串为规则列表"""
+        if not rules_str:
+            return []
+        try:
+            import json
+            rules = json.loads(rules_str)
+            return rules if isinstance(rules, list) else []
+        except Exception:
+            return []
 
     async def start(self):
         await self.producer.start()
@@ -200,11 +213,12 @@ class AIWAFStreamEngine:
         )
 
         # ── 请求头验证 ──
-        # 跳过豁免 IP（支持 CIDR）
+        # 跳过豁免 IP（支持 CIDR）+ 按路径规则跳过
         raw_headers = std_log.get("request_headers", "")
         header_skip_ips = await self.config_override.get_async("header_skip_ips", self.settings.header_skip_ips)
         header_skip_paths = await self.config_override.get_async("header_skip_paths", self.settings.header_skip_paths)
-        if raw_headers and self._should_check_header(ip, uri_path, header_skip_ips, header_skip_paths):
+        header_enabled = should_apply_middleware_for_path(uri_path, self._path_rules, "header_validation")
+        if raw_headers and header_enabled and self._should_check_header(ip, uri_path, header_skip_ips, header_skip_paths):
             try:
                 headers_dict = orjson.loads(raw_headers) if isinstance(raw_headers, str) else raw_headers
                 # 转为 WSGI environ 格式（evaluate_header_policy 期望的输入）
@@ -249,22 +263,23 @@ class AIWAFStreamEngine:
         # ── UUID 篡改检测 ──
         # 仅检测格式接近 UUID（36 字符含 dash）但解析失败的段
         # 避免对普通路径段误报
-        path_segments = uri_path.strip("/").split("/")
-        for seg in path_segments:
-            # 只检查 36 字符且含 dash 的段（UUID 格式特征）
-            if len(seg) == 36 and seg.count('-') >= 4 and is_malformed_uuid(seg):
-                try:
-                    record_uuid_signal(ip, "malformed_uuid")
+        if should_apply_middleware_for_path(uri_path, self._path_rules, "uuid_tamper"):
+            path_segments = uri_path.strip("/").split("/")
+            for seg in path_segments:
+                # 只检查 36 字符且含 dash 的段（UUID 格式特征）
+                if len(seg) == 36 and seg.count('-') >= 4 and is_malformed_uuid(seg):
                     try:
-                        await self._emit_alert(std_log, "UUIDTamper:malformed_uuid")
+                        record_uuid_signal(ip, "malformed_uuid")
+                        try:
+                            await self._emit_alert(std_log, "UUIDTamper:malformed_uuid")
+                        except Exception:
+                            pass
                     except Exception:
                         pass
-                except Exception:
-                    pass
-                break
+                    break
 
         # ── 地理围栏 (GeoIP) ──
-        if self.settings.geoip_db_path and GEOIP_AVAILABLE:
+        if self.settings.geoip_db_path and GEOIP_AVAILABLE and should_apply_middleware_for_path(uri_path, self._path_rules, "geo_block"):
             try:
                 country = lookup_country_name(ip, self.settings.geoip_db_path)
                 if country:
