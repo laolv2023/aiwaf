@@ -146,3 +146,12 @@ uuid_malformed_weight: 5                     # malformed UUID 权重
 uuid_not_found_weight: 1                     # UUID 不存在权重
 uuid_success_decay: 2                        # 成功衰减
 uuid_window_seconds: 60                      # 评分窗口（秒）
+
+# ── 检测模式全局开关（默认全开，设为 false 可单独关闭）──
+detection_header_enabled: true               # 请求头验证
+detection_uuid_enabled: true                 # UUID 篡改检测
+detection_geo_enabled: true                  # 地理围栏
+detection_rate_limit_enabled: true           # 速率限制
+detection_keyword_enabled: true              # 关键词策略检测
+detection_fail_secure_enabled: true          # Fail-Secure 降级
+detection_method_enabled: true               # HTTP 方法验证
