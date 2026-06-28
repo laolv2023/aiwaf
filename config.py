@@ -46,6 +46,11 @@ class Settings:
     rate_limit_flood_threshold: int = 150 # 洪泛检测阈值
     fail_secure_local_limit: int = 50     # Redis 不可用时的本地降级阈值
 
+    # 地理围栏
+    geoip_db_path: str = ""               # MaxMind GeoIP DB 路径（空=禁用）
+    geo_block_countries: str = ""         # 阻止的国家（逗号分隔）
+    geo_allow_countries: str = ""          # 允许的国家（逗号分隔，空=全部允许）
+
     @classmethod
     def from_env(cls) -> "Settings":
         """从环境变量加载配置"""
@@ -61,4 +66,7 @@ class Settings:
             rate_limit_max_requests=int(os.getenv("RATE_LIMIT_MAX_REQUESTS", "100")),
             rate_limit_flood_threshold=int(os.getenv("RATE_LIMIT_FLOOD_THRESHOLD", "150")),
             fail_secure_local_limit=int(os.getenv("FAIL_SECURE_LOCAL_LIMIT", "50")),
+            geoip_db_path=os.getenv("GEOIP_DB_PATH", ""),
+            geo_block_countries=os.getenv("GEO_BLOCK_COUNTRIES", ""),
+            geo_allow_countries=os.getenv("GEO_ALLOW_COUNTRIES", ""),
         )
