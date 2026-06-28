@@ -12,7 +12,7 @@ AIWAF-Stream 是一个**异步流式 Web 应用防火墙引擎**，从 Kafka 消
 
 - **Kafka 流式消费**：从 `akto.api.logs` Topic 消费 Akto 流量 JSON
 - **16 项检测能力**：关键词 + 速率限制 + AI 异常检测 + 请求头验证 + UUID 篡改 + 地理围栏 + 蜜罐 + 路径清单 + Fail-Secure 降级 + 熔断器 + 双缓冲写回 + 子进程隔离 + 关键词自学习
-- **48 项可配置**：YAML + 环境变量 + Redis 运行时覆盖（25 项可覆盖）
+- **72 项可配置**：YAML + 环境变量 + Redis 运行时覆盖（25 项可覆盖）
 - **427 测试用例**：100% 通过率
 
 ---
@@ -203,7 +203,7 @@ redis-cli DEL aiwaf:config:rate_limit_max_requests  # 恢复默认
 
 10 秒本地缓存，Redis 不可用时降级到 YAML/默认值。
 
-详见 `config.example.yaml`（48 项配置）。
+详见 `config.example.yaml`（72 项配置）。
 
 ---
 
