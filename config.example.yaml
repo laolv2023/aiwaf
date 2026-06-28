@@ -119,3 +119,30 @@ auto_learn_keywords: true
 # 按路径禁用检测模块（JSON 字符串）
 # 示例: [{"path": "/api/webhooks/", "disable": ["header_validation", "uuid_tamper"]}]
 path_rules: ""
+
+# ── 预定义特征追加（逗号分隔，追加到默认列表，不替换）──
+# 追加到 STATIC_KW（静态恶意关键词）
+static_keywords_extra: ""
+# 追加到 DEFAULT_LEGITIMATE_KEYWORDS（合法关键词白名单）
+legitimate_keywords_extra: ""
+# 追加到 INHERENTLY_MALICIOUS_PATTERNS（固有恶意模式）
+inherently_malicious_extra: ""
+# 追加到 VERY_STRONG_ATTACK_PATTERNS（强力攻击模式）
+very_strong_attacks_extra: ""
+# 追加到 PROBE_PATH_PATTERNS（探测路径正则）
+probe_path_patterns_extra: ""
+# 追加到 OBVIOUS_POST_ONLY_SUFFIXES（POST-only 端点后缀）
+post_only_suffixes_extra: ""
+# 追加到 LOGIN_PATH_PREFIXES（登录路径前缀）
+login_paths_extra: ""
+
+# ── 请求头参数（补充）──
+header_max_bytes: 32768                      # Header 最大字节数
+header_max_count: 100                        # Header 最大数量
+
+# ── UUID 篡改评分参数 ──
+uuid_block_threshold: 5                      # 拦截阈值
+uuid_malformed_weight: 5                     # malformed UUID 权重
+uuid_not_found_weight: 1                     # UUID 不存在权重
+uuid_success_decay: 2                        # 成功衰减
+uuid_window_seconds: 60                      # 评分窗口（秒）
