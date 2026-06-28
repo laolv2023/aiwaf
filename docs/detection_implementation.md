@@ -968,4 +968,4 @@ TTL: 10 秒本地缓存
 
 ### 完整配置文件示例
 
-见 `config.example.yaml`（72 项配置）。
+见 `config.example.yaml`（79 项配置）。
