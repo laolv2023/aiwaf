@@ -27,6 +27,33 @@ class MockSettings:
     dlq_topic: str = "aiwaf_dlq"
     input_topic: str = "akto.api.logs"
     consumer_group: str = "aiwaf-test-group"
+    redis_cluster_url: str = "redis://localhost:6379"
+    rate_limit_window: int = 60
+    rate_limit_max_requests: int = 100
+    rate_limit_flood_threshold: int = 150
+    fail_secure_local_limit: int = 50
+    geoip_db_path: str = ""
+    geo_block_countries: str = ""
+    geo_allow_countries: str = ""
+    kafka_enable_idempotence: bool = True
+    kafka_acks: str = "all"
+    kafka_auto_offset_reset: str = "earliest"
+    kafka_max_poll_records: int = 500
+    max_tasks_per_child: int = 200
+    batch_max_size: int = 50
+    batch_timeout_ms: int = 10
+    batch_queue_maxsize: int = 10000
+    keyword_refresh_interval: int = 10
+    keyword_top_n: int = 500
+    dedup_ttl: int = 86400
+    blacklist_ttl: int = 3600
+    local_blacklist_ttl: int = 300
+    local_rate_limit_ttl: int = 60
+    circuit_breaker_fail_max: int = 5
+    circuit_breaker_timeout: int = 60
+    max_pending_ips: int = 10000
+    max_body_hash_bytes: int = 10485760
+    max_body_store_bytes: int = 1024
 
 
 class MockStateMgr:
