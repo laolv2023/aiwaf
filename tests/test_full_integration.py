@@ -442,7 +442,7 @@ class TestConfigYAML:
         """配置项总数 = 50"""
         from dataclasses import fields
         count = len(fields(Settings))
-        assert count == 50, f"Expected 50 config fields, got {count}"
+        assert count == 51, f"Expected 51 config fields, got {count}"
 
 
 # ============================================================
