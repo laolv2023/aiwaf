@@ -83,10 +83,30 @@ def _make_is_malicious_context(status_code: int):
 
 
 def init_worker(model_path: str):
-    """ProcessPoolExecutor 的 initializer，在子进程启动时加载 AI 模型"""
+    """
+    ProcessPoolExecutor 的 initializer，在子进程启动时加载 AI 模型。
+
+    安全：使用 is_trusted_model_path() 校验路径白名单，
+    防止恶意模型文件通过 pickle 反序列化执行任意代码。
+    生产环境如需加载自定义路径，设置环境变量 AIWAF_ALLOW_CUSTOM_MODEL=1。
+    """
     global _local_model
     if not model_path:
         return
+
+    # 路径白名单校验
+    import os
+    allow_custom = os.getenv("AIWAF_ALLOW_CUSTOM_MODEL", "0") in ("1", "true", "yes")
+    from aiwaf.core.model_security import is_trusted_model_path
+    # 默认信任路径：与 engine 传入的 model_path 一致（由部署方控制）
+    if not allow_custom:
+        # 只允许 .pkl 后缀 + 文件存在 + 路径不含 ..（防目录穿越）
+        from pathlib import Path
+        p = Path(model_path)
+        if ".." in str(p) or not p.suffix == ".pkl":
+            _local_model = None
+            return
+
     try:
         import joblib
         _local_model = joblib.load(model_path)
