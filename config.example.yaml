@@ -91,3 +91,18 @@ header_max_accept_length: 4096
 header_suspicious_ua: ""
 # 合法爬虫 UA（逗号分隔，空=用内置默认列表 googlebot,bingbot,...）
 header_legitimate_bots: ""
+
+# ── AI 异常检测 ──
+ai_min_logs: 50                      # 最小训练样本数（不足则跳过 AI 训练）
+ai_contamination: 0.05               # IsolationForest 污染率（异常比例）
+ai_n_estimators: 100                 # IsolationForest 树数
+ai_max_samples: "auto"               # IsolationForest 最大样本数
+
+# ── 蜜罐时序检测 ──
+honeypot_ttl: 300                    # 蜜罐 GET 时间戳 TTL（秒）
+
+# ── 关键词策略 ──
+keyword_min_segment_length: 3        # 路径段最小长度（短于此不参与关键词检测）
+
+# ── Redis 同步 ──
+background_sync_interval: 5          # 后台同步 Worker 间隔（秒）
