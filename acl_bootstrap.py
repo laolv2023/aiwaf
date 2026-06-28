@@ -12,6 +12,7 @@ from aiwaf.core.malicious_context import (
     STATIC_KW,
     DEFAULT_LEGITIMATE_KEYWORDS,
 )
+from aiwaf.core.path_manifest import PathManifest, templify_path
 
 
 @dataclass
@@ -100,6 +101,7 @@ def run_core_logic_batch_isolated(
     malicious_keywords: set = None,
     flood_threshold: int = 150,
     keyword_learning_enabled: bool = True,
+    known_path_templates: set = None,
 ) -> List[Any]:
     """子进程批量执行入口，逐条容错"""
     if legitimate_keywords is None:
@@ -129,6 +131,13 @@ def run_core_logic_batch_isolated(
             status_code = std_log.get("status_code", 0)
             uri_path = std_log.get("uri_path", "")
 
+            # 使用 Path Manifest 判定路径是否存在
+            if known_path_templates is not None:
+                tmpl = templify_path(uri_path)
+                path_exists = tmpl in known_path_templates
+            else:
+                path_exists = False
+
             # 构建基于当前请求的 is_malicious_context 闭包
             # 使用完整 uri_path 进行判定（而非单独的 seg）
             def _ctx_fn(seg: str, _path=uri_path, _status=status_code) -> bool:
@@ -142,7 +151,7 @@ def run_core_logic_batch_isolated(
             kw_dec = evaluate_keyword_policy(
                 path=uri_path,
                 query_keys=std_log.get("query_keys", []),
-                path_exists=False,
+                path_exists=path_exists,
                 keyword_learning_enabled=keyword_learning_enabled,
                 static_keywords=STATIC_KW,
                 dynamic_keywords=dynamic_kws,
