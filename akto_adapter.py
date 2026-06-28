@@ -78,4 +78,6 @@ def parse_akto_json_message(raw_json: str) -> Dict[str, Any]:
         "direction": msg.get("direction", ""),
         "dest_ip": msg.get("destIp", ""),
         "response_payload": msg.get("responsePayload", ""),
+        "request_headers": msg.get("requestHeaders", ""),  # JSON string
+        "response_headers": msg.get("responseHeaders", ""),
     }
