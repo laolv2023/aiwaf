@@ -13,13 +13,13 @@ from prometheus_client import Counter
 
 from acl_bootstrap import init_worker, run_core_logic_batch_isolated, ItemErrorResult
 from redis_facade import (
-    RedisStateFacade, RedisClusterStateManager,
+    RedisStateFacade, RedisClusterStateManager, init_fail_secure,
     local_blacklist, local_rate_limit,
     _current_buffer, _backup_buffer, background_sync_worker
 )
 from aiwaf.core.rate_limit import FLOOD_BLOCK
 from akto_adapter import parse_akto_json_message
-from preprocessor import transform_raw_log
+from preprocessor import transform_raw_log, init_body_limits
 from aiwaf.core.path_manifest import PathManifest
 from aiwaf.core.header_validation import evaluate_header_policy
 from aiwaf.core.uuid_tamper import record_uuid_signal, is_malformed_uuid, collect_uuid_model_fields
@@ -33,21 +33,31 @@ METRIC_POOL_FATAL = Counter('aiwaf_pool_fatal_total', 'ProcessPool broken count'
 
 class AIWAFStreamEngine:
     def __init__(self, settings, state_mgr: RedisClusterStateManager, model_path: str):
+        self.settings = settings
         self.facade = RedisStateFacade(state_mgr)
         self.model_path = model_path
-        self.settings = settings
+
+        # 根据 settings 初始化 Fail-Secure 全局对象
+        init_fail_secure(settings)
+
+        # 根据 settings 初始化 Body 截断阈值
+        init_body_limits(
+            max_hash_bytes=settings.max_body_hash_bytes,
+            max_store_bytes=settings.max_body_store_bytes,
+        )
 
         self.core_executor = ProcessPoolExecutor(
             max_workers=settings.core_process_pool_size,
-            max_tasks_per_child=200,
+            max_tasks_per_child=settings.max_tasks_per_child,
             initializer=init_worker,
             initargs=(self.model_path,)
         )
-        self.batch_queue = asyncio.Queue(maxsize=10000)
+        self.batch_queue = asyncio.Queue(maxsize=settings.batch_queue_maxsize)
 
         self.producer = AIOKafkaProducer(
             bootstrap_servers=settings.kafka_brokers,
-            enable_idempotence=True, acks='all'
+            enable_idempotence=settings.kafka_enable_idempotence,
+            acks=settings.kafka_acks
         )
 
         self.dynamic_keywords_cache: List[str] = []
@@ -66,9 +76,9 @@ class AIWAFStreamEngine:
             group_id=self.settings.consumer_group,
             value_deserializer=lambda v: v,
             key_deserializer=lambda v: v.decode('utf-8') if v else None,
-            auto_offset_reset="earliest",
+            auto_offset_reset=self.settings.kafka_auto_offset_reset,
             enable_auto_commit=False,
-            max_poll_records=500,
+            max_poll_records=self.settings.kafka_max_poll_records,
         )
         await self.consumer.start()
 
@@ -95,16 +105,17 @@ class AIWAFStreamEngine:
             pass
 
     async def _keyword_refresh_worker(self):
-        """后台独立 Task 每 10 秒刷新缓存"""
+        """后台独立 Task 定时刷新缓存"""
+        interval = self.settings.keyword_refresh_interval
         while not self._cancel_event.is_set():
             try:
-                self.dynamic_keywords_cache = await self.facade.get_top_keywords(500)
+                self.dynamic_keywords_cache = await self.facade.get_top_keywords(self.settings.keyword_top_n)
             except (asyncbreaker.CircuitBreakerError, OSError, asyncio.TimeoutError):
                 pass
             try:
                 await asyncio.wait_for(
-                    asyncio.sleep(10),
-                    timeout=10,
+                    asyncio.sleep(interval),
+                    timeout=interval,
                 )
             except (asyncio.TimeoutError, asyncio.CancelledError):
                 return
@@ -120,8 +131,8 @@ class AIWAFStreamEngine:
 
                 if not self.batch_queue.empty():
                     try:
-                        async with asyncio.timeout(0.01):
-                            while len(batch_logs) < 50:
+                        async with asyncio.timeout(self.settings.batch_timeout_ms / 1000):
+                            while len(batch_logs) < self.settings.batch_max_size:
                                 item = await self.batch_queue.get()
                                 batch_logs.append(item['log']); batch_ts.append(item['ts'])
                                 batch_et.append(item['et']); batch_futures.append(item['future'])
