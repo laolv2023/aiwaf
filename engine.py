@@ -20,6 +20,7 @@ from redis_facade import (
 from aiwaf.core.rate_limit import FLOOD_BLOCK
 from akto_adapter import parse_akto_json_message
 from preprocessor import transform_raw_log
+from aiwaf.core.path_manifest import PathManifest
 
 METRIC_ENGINE_IN = Counter('aiwaf_engine_in_total', 'Logs received')
 METRIC_DLQ_OUT = Counter('aiwaf_dlq_out_total', 'Messages routed to DLQ')
@@ -49,6 +50,7 @@ class AIWAFStreamEngine:
         self._tasks: list = []
         self._cancel_event = asyncio.Event()
         self.consumer = None
+        self.path_manifest = PathManifest()
 
     async def start(self):
         await self.producer.start()
@@ -125,9 +127,12 @@ class AIWAFStreamEngine:
                 current_kws = self.dynamic_keywords_cache
 
                 loop = asyncio.get_running_loop()
+                # 传入已知路径模板集（用于 path_exists 判定）
+                known_paths = self.path_manifest.get_all_templates()
                 batch_results = await loop.run_in_executor(
                     self.core_executor, run_core_logic_batch_isolated,
-                    batch_logs, batch_ts, batch_et, current_kws
+                    batch_logs, batch_ts, batch_et, current_kws,
+                    (), None, None, (), None, 150, True, known_paths
                 )
                 if len(batch_results) != len(batch_futures):
                     min_len = min(len(batch_futures), len(batch_results))
@@ -161,6 +166,13 @@ class AIWAFStreamEngine:
         trace_id = std_log.get("trace_id", "unknown")
         ip = std_log.get("client_ip", "unknown")
         event_time = std_log.get("timestamp", 0.0)
+
+        # 记录路径到 Path Manifest（用于 path_exists 判定）
+        self.path_manifest.record(
+            path=std_log.get("uri_path", "/"),
+            method=std_log.get("method", "GET"),
+            status_code=std_log.get("status_code", 0),
+        )
 
         redis_available = True
         try:
