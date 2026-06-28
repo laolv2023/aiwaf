@@ -83,7 +83,9 @@ class AIWAFStreamEngine:
         await self.consumer.start()
 
         self._tasks.append(asyncio.create_task(self._batch_dispatcher()))
-        self._tasks.append(asyncio.create_task(background_sync_worker(self.facade.mgr, self._cancel_event)))
+        self._tasks.append(asyncio.create_task(
+            background_sync_worker(self.facade.mgr, self._cancel_event, self.settings.background_sync_interval)
+        ))
         self._tasks.append(asyncio.create_task(self._keyword_refresh_worker()))
         self._tasks.append(asyncio.create_task(self._consume_loop()))
 
