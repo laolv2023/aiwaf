@@ -89,6 +89,15 @@ class Settings:
     max_body_hash_bytes: int = 10485760    # Body 哈希截断阈值（字节，默认 10MB）
     max_body_store_bytes: int = 1024       # Body 存储截断阈值（字节，默认 1KB）
 
+    # 请求头验证
+    header_required: str = "user-agent,accept"  # 必需头（逗号分隔，空=不检查）
+    header_skip_ips: str = ""                  # 跳过头检查的 IP/CIDR（逗号分隔）
+    header_skip_paths: str = ""                # 跳过头检查的路径前缀（逗号分隔）
+    header_max_ua_length: int = 500            # User-Agent 最大长度
+    header_max_accept_length: int = 4096       # Accept 最大长度
+    header_suspicious_ua: str = ""             # 自定义可疑 UA 模式（逗号分隔，空=用默认）
+    header_legitimate_bots: str = ""           # 合法爬虫 UA（逗号分隔，空=用默认）
+
     @classmethod
     def from_yaml(cls, path: str) -> "Settings":
         """从 YAML 配置文件加载"""
@@ -156,6 +165,13 @@ class Settings:
             "max_pending_ips":             "MAX_PENDING_IPS",
             "max_body_hash_bytes":         "MAX_BODY_HASH_BYTES",
             "max_body_store_bytes":        "MAX_BODY_STORE_BYTES",
+            "header_required":             "HEADER_REQUIRED",
+            "header_skip_ips":             "HEADER_SKIP_IPS",
+            "header_skip_paths":           "HEADER_SKIP_PATHS",
+            "header_max_ua_length":        "HEADER_MAX_UA_LENGTH",
+            "header_max_accept_length":    "HEADER_MAX_ACCEPT_LENGTH",
+            "header_suspicious_ua":        "HEADER_SUSPICIOUS_UA",
+            "header_legitimate_bots":      "HEADER_LEGITIMATE_BOTS",
         }
 
         int_fields = {
@@ -168,6 +184,7 @@ class Settings:
             "dedup_ttl", "blacklist_ttl", "local_blacklist_ttl", "local_rate_limit_ttl",
             "circuit_breaker_fail_max", "circuit_breaker_timeout",
             "max_pending_ips", "max_body_hash_bytes", "max_body_store_bytes",
+            "header_max_ua_length", "header_max_accept_length",
         }
 
         bool_fields = {
