@@ -258,11 +258,11 @@ class AIWAFStreamEngine:
         )
 
         # ── 请求头验证 ──
-        # 跳过豁免 IP（支持 CIDR）+ 按路径规则跳过
+        # 跳过豁免 IP（支持 CIDR）+ 按路径规则跳过 + 全局开关
         raw_headers = std_log.get("request_headers", "")
         header_skip_ips = await self.config_override.get_async("header_skip_ips", self.settings.header_skip_ips)
         header_skip_paths = await self.config_override.get_async("header_skip_paths", self.settings.header_skip_paths)
-        header_enabled = should_apply_middleware_for_path(uri_path, self._path_rules, "header_validation")
+        header_enabled = self.settings.detection_header_enabled and should_apply_middleware_for_path(uri_path, self._path_rules, "header_validation")
         if raw_headers and header_enabled and self._should_check_header(ip, uri_path, header_skip_ips, header_skip_paths):
             try:
                 headers_dict = orjson.loads(raw_headers) if isinstance(raw_headers, str) else raw_headers
@@ -308,9 +308,8 @@ class AIWAFStreamEngine:
                 return  # 豁免路径跳过所有检测
 
         # ── UUID 篡改检测 ──
-        # 仅检测格式接近 UUID（36 字符含 dash）但解析失败的段
-        # 避免对普通路径段误报
-        if should_apply_middleware_for_path(uri_path, self._path_rules, "uuid_tamper"):
+        # 全局开关 + 按路径规则跳过
+        if self.settings.detection_uuid_enabled and should_apply_middleware_for_path(uri_path, self._path_rules, "uuid_tamper"):
             path_segments = uri_path.strip("/").split("/")
             for seg in path_segments:
                 # 只检查 36 字符且含 dash 的段（UUID 格式特征）
@@ -332,7 +331,7 @@ class AIWAFStreamEngine:
                     break
 
         # ── 地理围栏 (GeoIP) ──
-        if self.settings.geoip_db_path and GEOIP_AVAILABLE and should_apply_middleware_for_path(uri_path, self._path_rules, "geo_block"):
+        if self.settings.detection_geo_enabled and self.settings.geoip_db_path and GEOIP_AVAILABLE and should_apply_middleware_for_path(uri_path, self._path_rules, "geo_block"):
             try:
                 country = lookup_country_name(ip, self.settings.geoip_db_path)
                 if country:
@@ -355,15 +354,20 @@ class AIWAFStreamEngine:
         try:
             if await self.facade.is_duplicate_and_add(trace_id, is_retry, retry_count):
                 return
-            timestamps = await self.facade.get_and_update_rate_limit(
-                ip, event_time,
-                await self.config_override.get_async("rate_limit_window", self.settings.rate_limit_window),
-                await self.config_override.get_async("rate_limit_max_requests", self.settings.rate_limit_max_requests),
-            )
+            if self.settings.detection_rate_limit_enabled:
+                timestamps = await self.facade.get_and_update_rate_limit(
+                    ip, event_time,
+                    await self.config_override.get_async("rate_limit_window", self.settings.rate_limit_window),
+                    await self.config_override.get_async("rate_limit_max_requests", self.settings.rate_limit_max_requests),
+                )
+            else:
+                timestamps = []
         except asyncbreaker.CircuitBreakerError:
             redis_available = False
 
-            # Fail-Secure 本地防线
+            # Fail-Secure 本地防线（可全局关闭）
+            if not self.settings.detection_fail_secure_enabled:
+                return
             if ip in local_blacklist or ip in _current_buffer or ip in _backup_buffer:
                 try:
                     await self._emit_alert(std_log, "Local_Blacklist_Block")
@@ -418,12 +422,12 @@ class AIWAFStreamEngine:
             if auto_learn and result.side_effects.get('learned_keywords'):
                 asyncio.create_task(self._batch_add_keywords(result.side_effects.get('learned_keywords', [])))
 
-        if result.rl_decision.action == FLOOD_BLOCK:
+        if self.settings.detection_rate_limit_enabled and result.rl_decision.action == FLOOD_BLOCK:
             try:
                 await self._emit_alert(std_log, "RateLimitFlood")
             except Exception:
                 pass
-        elif result.kw_decision.block_reason:
+        elif self.settings.detection_keyword_enabled and result.kw_decision.block_reason:
             try:
                 await self._emit_alert(std_log, f"KeywordBlock:{result.kw_decision.block_reason}")
             except Exception:
