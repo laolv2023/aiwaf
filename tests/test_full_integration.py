@@ -22,10 +22,10 @@ _mock_prom = MagicMock()
 sys.modules.setdefault('prometheus_client', _mock_prom)
 
 import pytest
-from akto_adapter import parse_akto_json_message
-from preprocessor import transform_raw_log, init_body_limits, generate_deterministic_trace_id
-from config import Settings
-from config_override import ConfigOverride, _OVERRIDABLE_KEYS
+from aiwaf.stream.akto_adapter import parse_akto_json_message
+from aiwaf.stream.preprocessor import transform_raw_log, init_body_limits, generate_deterministic_trace_id
+from aiwaf.stream.config import Settings
+from aiwaf.stream.config_override import ConfigOverride, _OVERRIDABLE_KEYS
 from aiwaf.core.path_manifest import PathManifest, templify_path, PathStats
 from aiwaf.core.malicious_context import is_malicious_context, is_scanning_path, STATIC_KW, DEFAULT_LEGITIMATE_KEYWORDS
 from aiwaf.core.header_validation import evaluate_header_policy
@@ -675,7 +675,7 @@ class TestExemptPaths:
     @pytest.mark.asyncio
     async def test_add_exempt_path(self, facade):
         """添加豁免路径"""
-        from redis_facade import RedisStateFacade
+        from aiwaf.stream.redis_facade import RedisStateFacade
         f = RedisStateFacade(facade.mgr)
         facade.mgr.redis.sadd = AsyncMock()
         await f.add_exempt_path("/api/health")
@@ -684,7 +684,7 @@ class TestExemptPaths:
     @pytest.mark.asyncio
     async def test_remove_exempt_path(self, facade):
         """移除豁免路径"""
-        from redis_facade import RedisStateFacade
+        from aiwaf.stream.redis_facade import RedisStateFacade
         f = RedisStateFacade(facade.mgr)
         facade.mgr.redis.srem = AsyncMock()
         await f.remove_exempt_path("/api/health")
@@ -693,7 +693,7 @@ class TestExemptPaths:
     @pytest.mark.asyncio
     async def test_get_exempt_paths(self, facade):
         """获取豁免路径"""
-        from redis_facade import RedisStateFacade
+        from aiwaf.stream.redis_facade import RedisStateFacade
         f = RedisStateFacade(facade.mgr)
         facade.mgr.redis.smembers = AsyncMock(return_value={"/api/health", "/api/metrics"})
         result = await f.get_exempt_paths()
@@ -703,7 +703,7 @@ class TestExemptPaths:
     @pytest.mark.asyncio
     async def test_get_exempt_paths_redis_error(self, facade):
         """Redis 异常返回空列表"""
-        from redis_facade import RedisStateFacade
+        from aiwaf.stream.redis_facade import RedisStateFacade
         f = RedisStateFacade(facade.mgr)
         facade.mgr.redis.smembers = AsyncMock(side_effect=Exception("connection refused"))
         result = await f.get_exempt_paths()
@@ -712,7 +712,7 @@ class TestExemptPaths:
     @pytest.mark.asyncio
     async def test_add_exempt_path_redis_error(self, facade):
         """添加时 Redis 异常不崩溃"""
-        from redis_facade import RedisStateFacade
+        from aiwaf.stream.redis_facade import RedisStateFacade
         f = RedisStateFacade(facade.mgr)
         facade.mgr.redis.sadd = AsyncMock(side_effect=Exception("connection refused"))
         await f.add_exempt_path("/api/health")  # 不应抛异常
@@ -720,7 +720,7 @@ class TestExemptPaths:
     @pytest.mark.asyncio
     async def test_remove_exempt_path_redis_error(self, facade):
         """移除时 Redis 异常不崩溃"""
-        from redis_facade import RedisStateFacade
+        from aiwaf.stream.redis_facade import RedisStateFacade
         f = RedisStateFacade(facade.mgr)
         facade.mgr.redis.srem = AsyncMock(side_effect=Exception("connection refused"))
         await f.remove_exempt_path("/api/health")  # 不应抛异常
