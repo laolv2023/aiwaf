@@ -116,6 +116,10 @@ class Settings:
     # Kafka 消费
     kafka_retry_interval: int = 5              # 消费循环异常后重试间隔（秒）
 
+    # 人工审核模式
+    auto_block_enabled: bool = True            # 自动拉黑 IP（False=只告警不拉黑，需人工审批）
+    auto_learn_keywords: bool = True           # 自动学习关键词（False=只告警不学习）
+
     @classmethod
     def from_yaml(cls, path: str) -> "Settings":
         """从 YAML 配置文件加载"""
@@ -198,6 +202,8 @@ class Settings:
             "keyword_min_segment_length":  "KEYWORD_MIN_SEGMENT_LENGTH",
             "background_sync_interval":    "BACKGROUND_SYNC_INTERVAL",
             "kafka_retry_interval":        "KAFKA_RETRY_INTERVAL",
+            "auto_block_enabled":          "AUTO_BLOCK_ENABLED",
+            "auto_learn_keywords":         "AUTO_LEARN_KEYWORDS",
         }
 
         int_fields = {
@@ -226,6 +232,8 @@ class Settings:
 
         bool_fields = {
             "kafka_enable_idempotence",
+            "auto_block_enabled",
+            "auto_learn_keywords",
         }
 
         for attr, env_key in env_map.items():
