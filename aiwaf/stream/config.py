@@ -133,6 +133,15 @@ class Settings:
     post_only_suffixes_extra: str = ""           # 追加到 OBVIOUS_POST_ONLY_SUFFIXES
     login_paths_extra: str = ""                  # 追加到 LOGIN_PATH_PREFIXES
 
+    # 预定义特征替换模式（false=追加到默认值，true=仅使用自定义值替换默认值）
+    static_keywords_replace_mode: bool = False
+    legitimate_keywords_replace_mode: bool = False
+    inherently_malicious_replace_mode: bool = False
+    very_strong_attacks_replace_mode: bool = False
+    probe_path_patterns_replace_mode: bool = False
+    post_only_suffixes_replace_mode: bool = False
+    login_paths_replace_mode: bool = False
+
     # 请求头参数（已有部分，补充剩余）
     header_max_bytes: int = 32768                # Header 最大字节数
     header_max_count: int = 100                  # Header 最大数量
@@ -245,6 +254,13 @@ class Settings:
             "probe_path_patterns_extra":   "PROBE_PATH_PATTERNS_EXTRA",
             "post_only_suffixes_extra":    "POST_ONLY_SUFFIXES_EXTRA",
             "login_paths_extra":           "LOGIN_PATHS_EXTRA",
+            "static_keywords_replace_mode": "STATIC_KEYWORDS_REPLACE_MODE",
+            "legitimate_keywords_replace_mode": "LEGITIMATE_KEYWORDS_REPLACE_MODE",
+            "inherently_malicious_replace_mode": "INHERENTLY_MALICIOUS_REPLACE_MODE",
+            "very_strong_attacks_replace_mode": "VERY_STRONG_ATTACKS_REPLACE_MODE",
+            "probe_path_patterns_replace_mode": "PROBE_PATH_PATTERNS_REPLACE_MODE",
+            "post_only_suffixes_replace_mode": "POST_ONLY_SUFFIXES_REPLACE_MODE",
+            "login_paths_replace_mode":    "LOGIN_PATHS_REPLACE_MODE",
             "header_max_bytes":            "HEADER_MAX_BYTES",
             "header_max_count":            "HEADER_MAX_COUNT",
             "uuid_block_threshold":        "UUID_BLOCK_THRESHOLD",
@@ -299,6 +315,13 @@ class Settings:
             "detection_keyword_enabled",
             "detection_fail_secure_enabled",
             "detection_method_enabled",
+            "static_keywords_replace_mode",
+            "legitimate_keywords_replace_mode",
+            "inherently_malicious_replace_mode",
+            "very_strong_attacks_replace_mode",
+            "probe_path_patterns_replace_mode",
+            "post_only_suffixes_replace_mode",
+            "login_paths_replace_mode",
         }
 
         for attr, env_key in env_map.items():
