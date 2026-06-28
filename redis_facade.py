@@ -112,11 +112,11 @@ def init_fail_secure(settings):
     _backup_buffer = _pending_buffer_B
 
 
-async def background_sync_worker(state_mgr: RedisClusterStateManager, cancel_event: asyncio.Event = None):
+async def background_sync_worker(state_mgr: RedisClusterStateManager, cancel_event: asyncio.Event = None, sync_interval: int = 5):
     """高优先级写回 Worker (双缓冲机制)"""
     global _current_buffer, _backup_buffer
     while not (cancel_event and cancel_event.is_set()):
-        await asyncio.sleep(5)
+        await asyncio.sleep(sync_interval)
         if not _current_buffer:
             continue
 
