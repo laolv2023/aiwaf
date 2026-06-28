@@ -21,9 +21,9 @@ _mock_prom = MagicMock()
 sys.modules.setdefault('prometheus_client', _mock_prom)
 
 import pytest
-from akto_adapter import parse_akto_json_message
-from preprocessor import transform_raw_log, generate_deterministic_trace_id, MAX_BODY_STORE_BYTES, MAX_BODY_HASH_BYTES
-from config import Settings
+from aiwaf.stream.akto_adapter import parse_akto_json_message
+from aiwaf.stream.preprocessor import transform_raw_log, generate_deterministic_trace_id, MAX_BODY_STORE_BYTES, MAX_BODY_HASH_BYTES
+from aiwaf.stream.config import Settings
 
 
 # ============================================================
@@ -474,11 +474,11 @@ class TestConsumeLoop:
     @pytest.fixture
     def engine(self):
         with patch('concurrent.futures.ProcessPoolExecutor', MagicMock()):
-            with patch('engine.AIOKafkaProducer', MagicMock()):
-                with patch('engine.AIOKafkaConsumer', MagicMock()):
-                    with patch('acl_bootstrap.init_worker'):
-                        with patch('acl_bootstrap.run_core_logic_batch_isolated'):
-                            from engine import AIWAFStreamEngine
+            with patch('aiwaf.stream.engine.AIOKafkaProducer', MagicMock()):
+                with patch('aiwaf.stream.engine.AIOKafkaConsumer', MagicMock()):
+                    with patch('aiwaf.stream.acl_bootstrap.init_worker'):
+                        with patch('aiwaf.stream.acl_bootstrap.run_core_logic_batch_isolated'):
+                            from aiwaf.stream.engine import AIWAFStreamEngine
                             eng = AIWAFStreamEngine(MockSettings(), MockStateMgr(), "/f")
                             eng.producer.start = AsyncMock()
                             eng.producer.send_and_wait = AsyncMock()
@@ -844,11 +844,11 @@ class TestEmitAlert:
     @pytest.fixture
     def engine(self):
         with patch('concurrent.futures.ProcessPoolExecutor', MagicMock()):
-            with patch('engine.AIOKafkaProducer', MagicMock()):
-                with patch('engine.AIOKafkaConsumer', MagicMock()):
-                    with patch('acl_bootstrap.init_worker'):
-                        with patch('acl_bootstrap.run_core_logic_batch_isolated'):
-                            from engine import AIWAFStreamEngine
+            with patch('aiwaf.stream.engine.AIOKafkaProducer', MagicMock()):
+                with patch('aiwaf.stream.engine.AIOKafkaConsumer', MagicMock()):
+                    with patch('aiwaf.stream.acl_bootstrap.init_worker'):
+                        with patch('aiwaf.stream.acl_bootstrap.run_core_logic_batch_isolated'):
+                            from aiwaf.stream.engine import AIWAFStreamEngine
                             eng = AIWAFStreamEngine(MockSettings(), MockStateMgr(), "/f")
                             eng.producer.start = AsyncMock()
                             eng.producer.send_and_wait = AsyncMock()
@@ -967,11 +967,11 @@ class TestClassifySeverity:
     @pytest.fixture
     def engine(self):
         with patch('concurrent.futures.ProcessPoolExecutor', MagicMock()):
-            with patch('engine.AIOKafkaProducer', MagicMock()):
-                with patch('engine.AIOKafkaConsumer', MagicMock()):
-                    with patch('acl_bootstrap.init_worker'):
-                        with patch('acl_bootstrap.run_core_logic_batch_isolated'):
-                            from engine import AIWAFStreamEngine
+            with patch('aiwaf.stream.engine.AIOKafkaProducer', MagicMock()):
+                with patch('aiwaf.stream.engine.AIOKafkaConsumer', MagicMock()):
+                    with patch('aiwaf.stream.acl_bootstrap.init_worker'):
+                        with patch('aiwaf.stream.acl_bootstrap.run_core_logic_batch_isolated'):
+                            from aiwaf.stream.engine import AIWAFStreamEngine
                             eng = AIWAFStreamEngine(MockSettings(), MockStateMgr(), "/f")
                             return eng
 
