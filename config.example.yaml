@@ -1,0 +1,39 @@
+# AIWAF-Stream 配置文件
+#
+# 使用方式:
+#   1. 将此文件复制为 config.yaml
+#   2. 修改所需配置项
+#   3. 启动: python engine.py
+#
+# 或指定路径:
+#   AIWAF_CONFIG=/etc/aiwaf/config.yaml python engine.py
+#
+# 环境变量会覆盖 YAML 中同名字段（优先级：环境变量 > YAML > 默认值）
+
+# ── Redis ──
+redis_cluster_url: "redis://localhost:6379"
+
+# ── Kafka ──
+kafka_brokers: "localhost:9092"
+
+# Kafka Topics
+input_topic: "akto.api.logs"        # 消费 Topic（Akto 流量日志 JSON）
+alert_topic: "akto.aiwaf.alerts"     # 告警 Topic
+dlq_topic: "akto.aiwaf.dlq"          # 死信 Topic
+
+# Kafka Consumer
+consumer_group: "aiwaf-consumer-group"
+
+# ── 进程池 ──
+core_process_pool_size: 4
+
+# ── 速率限制 ──
+rate_limit_window: 60                # 窗口大小（秒）
+rate_limit_max_requests: 100         # 窗口内最大请求数
+rate_limit_flood_threshold: 150      # 洪泛检测阈值
+fail_secure_local_limit: 50          # Redis 不可用时的本地降级阈值
+
+# ── 地理围栏 ──
+geoip_db_path: ""                    # MaxMind GeoIP2 DB 路径（空=禁用）
+geo_block_countries: ""              # 阻止的国家（逗号分隔，如 "CN,RU,KP"）
+geo_allow_countries: ""              # 允许的国家（逗号分隔，空=全部允许）
