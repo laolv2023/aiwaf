@@ -53,46 +53,72 @@ class AIWAFStreamEngine:
         self._apply_extra_patterns(settings)
 
     def _apply_extra_patterns(self, settings):
-        """将配置中的追加特征合并到模块常量"""
+        """将配置中的特征合并到模块常量（追加或替换模式）"""
         import aiwaf.core.ip_keyword as ip_kw
         import aiwaf.core.malicious_context as mc
         import aiwaf.core.honeypot as hp
 
-        # STATIC_KW 追加
+        # STATIC_KW
         if settings.static_keywords_extra:
             extra = [s.strip() for s in settings.static_keywords_extra.split(",") if s.strip()]
-            mc.STATIC_KW = list(mc.STATIC_KW) + extra
+            if settings.static_keywords_replace_mode:
+                mc.STATIC_KW = extra
+            else:
+                mc.STATIC_KW = list(mc.STATIC_KW) + extra
 
-        # DEFAULT_LEGITIMATE_KEYWORDS 追加
+        # DEFAULT_LEGITIMATE_KEYWORDS
         if settings.legitimate_keywords_extra:
             extra = set(s.strip() for s in settings.legitimate_keywords_extra.split(",") if s.strip())
-            mc.DEFAULT_LEGITIMATE_KEYWORDS = mc.DEFAULT_LEGITIMATE_KEYWORDS | extra
+            if settings.legitimate_keywords_replace_mode:
+                mc.DEFAULT_LEGITIMATE_KEYWORDS = extra
+            else:
+                mc.DEFAULT_LEGITIMATE_KEYWORDS = mc.DEFAULT_LEGITIMATE_KEYWORDS | extra
 
-        # INHERENTLY_MALICIOUS_PATTERNS 追加
+        # INHERENTLY_MALICIOUS_PATTERNS
         if settings.inherently_malicious_extra:
             extra = tuple(s.strip() for s in settings.inherently_malicious_extra.split(",") if s.strip())
-            ip_kw.INHERENTLY_MALICIOUS_PATTERNS = ip_kw.INHERENTLY_MALICIOUS_PATTERNS + extra
+            if settings.inherently_malicious_replace_mode:
+                ip_kw.INHERENTLY_MALICIOUS_PATTERNS = extra
+            else:
+                ip_kw.INHERENTLY_MALICIOUS_PATTERNS = ip_kw.INHERENTLY_MALICIOUS_PATTERNS + extra
 
-        # VERY_STRONG_ATTACK_PATTERNS 追加
+        # VERY_STRONG_ATTACK_PATTERNS
         if settings.very_strong_attacks_extra:
             extra = tuple(s.strip() for s in settings.very_strong_attacks_extra.split(",") if s.strip())
-            ip_kw.VERY_STRONG_ATTACK_PATTERNS = ip_kw.VERY_STRONG_ATTACK_PATTERNS + extra
+            if settings.very_strong_attacks_replace_mode:
+                ip_kw.VERY_STRONG_ATTACK_PATTERNS = extra
+            else:
+                ip_kw.VERY_STRONG_ATTACK_PATTERNS = ip_kw.VERY_STRONG_ATTACK_PATTERNS + extra
 
-        # PROBE_PATH_PATTERNS 追加（编译为正则）
+        # PROBE_PATH_PATTERNS（编译为正则）
         if settings.probe_path_patterns_extra:
             import re
             extra = tuple(re.compile(p.strip()) for p in settings.probe_path_patterns_extra.split(",") if p.strip())
-            ip_kw.PROBE_PATH_PATTERNS = ip_kw.PROBE_PATH_PATTERNS + extra
+            if settings.probe_path_patterns_replace_mode:
+                ip_kw.PROBE_PATH_PATTERNS = extra
+            else:
+                ip_kw.PROBE_PATH_PATTERNS = ip_kw.PROBE_PATH_PATTERNS + extra
 
-        # OBVIOUS_POST_ONLY_SUFFIXES 追加
+        # OBVIOUS_POST_ONLY_SUFFIXES
         if settings.post_only_suffixes_extra:
             extra = tuple(s.strip() for s in settings.post_only_suffixes_extra.split(",") if s.strip())
-            hp.OBVIOUS_POST_ONLY_SUFFIXES = hp.OBVIOUS_POST_ONLY_SUFFIXES + extra
+            if settings.post_only_suffixes_replace_mode:
+                hp.OBVIOUS_POST_ONLY_SUFFIXES = extra
+            else:
+                hp.OBVIOUS_POST_ONLY_SUFFIXES = hp.OBVIOUS_POST_ONLY_SUFFIXES + extra
 
-        # LOGIN_PATH_PREFIXES 追加
+        # LOGIN_PATH_PREFIXES
         if settings.login_paths_extra:
             extra = tuple(s.strip() for s in settings.login_paths_extra.split(",") if s.strip())
-            hp.LOGIN_PATH_PREFIXES = hp.LOGIN_PATH_PREFIXES + extra
+            if settings.login_paths_replace_mode:
+                hp.LOGIN_PATH_PREFIXES = extra
+            else:
+                hp.LOGIN_PATH_PREFIXES = hp.LOGIN_PATH_PREFIXES + extra
+
+        # 同步更新 acl_bootstrap 中的引用（子进程 import 快照问题）
+        import aiwaf.stream.acl_bootstrap as ab
+        ab.STATIC_KW = mc.STATIC_KW
+        ab.DEFAULT_LEGITIMATE_KEYWORDS = mc.DEFAULT_LEGITIMATE_KEYWORDS
 
         self.core_executor = ProcessPoolExecutor(
             max_workers=settings.core_process_pool_size,
