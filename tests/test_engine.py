@@ -93,9 +93,9 @@ class TestEngineNormalPath:
     def engine(self):
         with patch('concurrent.futures.ProcessPoolExecutor', MagicMock()):
             with patch('aiokafka.AIOKafkaProducer', MagicMock()):
-                with patch('acl_bootstrap.init_worker'):
-                    with patch('acl_bootstrap.run_core_logic_batch_isolated'):
-                        from engine import AIWAFStreamEngine
+                with patch('aiwaf.stream.acl_bootstrap.init_worker'):
+                    with patch('aiwaf.stream.acl_bootstrap.run_core_logic_batch_isolated'):
+                        from aiwaf.stream.engine import AIWAFStreamEngine
                         import redis_facade
                         redis_facade.local_blacklist.clear()
                         redis_facade.local_rate_limit.clear()
@@ -209,9 +209,9 @@ class TestFailSecure:
     def engine(self):
         with patch('concurrent.futures.ProcessPoolExecutor', MagicMock()):
             with patch('aiokafka.AIOKafkaProducer', MagicMock()):
-                with patch('acl_bootstrap.init_worker'):
-                    with patch('acl_bootstrap.run_core_logic_batch_isolated'):
-                        from engine import AIWAFStreamEngine
+                with patch('aiwaf.stream.acl_bootstrap.init_worker'):
+                    with patch('aiwaf.stream.acl_bootstrap.run_core_logic_batch_isolated'):
+                        from aiwaf.stream.engine import AIWAFStreamEngine
                         import redis_facade
                         redis_facade.local_blacklist.clear()
                         redis_facade.local_rate_limit.clear()
@@ -224,21 +224,21 @@ class TestFailSecure:
 
     @pytest.mark.asyncio
     async def test_circuit_breaker_error_triggers_fail_secure(self, engine):
-        import asyncbreaker
+        from aiwaf.stream import asyncbreaker
         engine.facade.is_duplicate_and_add = AsyncMock(side_effect=asyncbreaker.CircuitBreakerError('breaker open'))
         log = make_std_log()
         await engine.process_log(log)
 
     @pytest.mark.asyncio
     async def test_local_blacklist_blocks_ip(self, engine):
-        import asyncbreaker, redis_facade
+        from aiwaf.stream import asyncbreaker, redis_facade
         redis_facade.local_blacklist["1.1.1.1"] = True
         engine.facade.is_duplicate_and_add = AsyncMock(side_effect=asyncbreaker.CircuitBreakerError('breaker open'))
         await engine.process_log(make_std_log(ip="1.1.1.1"))
 
     @pytest.mark.asyncio
     async def test_local_blacklist_emits_alert(self, engine):
-        import asyncbreaker, redis_facade
+        from aiwaf.stream import asyncbreaker, redis_facade
         redis_facade.local_blacklist["5.5.5.5"] = True
         engine.facade.is_duplicate_and_add = AsyncMock(side_effect=asyncbreaker.CircuitBreakerError('breaker open'))
         engine.producer.send_and_wait.reset_mock()
@@ -247,7 +247,7 @@ class TestFailSecure:
 
     @pytest.mark.asyncio
     async def test_local_rate_limit_increments(self, engine):
-        import asyncbreaker, redis_facade
+        from aiwaf.stream import asyncbreaker, redis_facade
         engine.facade.is_duplicate_and_add = AsyncMock(side_effect=asyncbreaker.CircuitBreakerError('breaker open'))
         for _ in range(3):
             await engine.process_log(make_std_log(ip="2.2.2.2"))
@@ -255,14 +255,14 @@ class TestFailSecure:
 
     @pytest.mark.asyncio
     async def test_local_rate_limit_below_50_passes(self, engine):
-        import asyncbreaker, redis_facade
+        from aiwaf.stream import asyncbreaker, redis_facade
         engine.facade.is_duplicate_and_add = AsyncMock(side_effect=asyncbreaker.CircuitBreakerError('breaker open'))
         await engine.process_log(make_std_log(ip="3.3.3.3"))
         assert redis_facade.local_rate_limit["3.3.3.3"] == 1
 
     @pytest.mark.asyncio
     async def test_local_rate_limit_above_50_blacklists(self, engine):
-        import asyncbreaker, redis_facade
+        from aiwaf.stream import asyncbreaker, redis_facade
         engine.facade.is_duplicate_and_add = AsyncMock(side_effect=asyncbreaker.CircuitBreakerError('breaker open'))
         for _ in range(51):
             await engine.process_log(make_std_log(ip="4.4.4.4"))
@@ -270,7 +270,7 @@ class TestFailSecure:
 
     @pytest.mark.asyncio
     async def test_local_rate_limit_triggers_alert(self, engine):
-        import asyncbreaker, redis_facade
+        from aiwaf.stream import asyncbreaker, redis_facade
         engine.facade.is_duplicate_and_add = AsyncMock(side_effect=asyncbreaker.CircuitBreakerError('breaker open'))
         engine.producer.send_and_wait.reset_mock()
         for _ in range(51):
@@ -279,7 +279,7 @@ class TestFailSecure:
 
     @pytest.mark.asyncio
     async def test_fail_secure_alert_failure_does_not_crash(self, engine):
-        import asyncbreaker, redis_facade
+        from aiwaf.stream import asyncbreaker, redis_facade
         redis_facade.local_blacklist["8.8.8.8"] = True
         engine.facade.is_duplicate_and_add = AsyncMock(side_effect=asyncbreaker.CircuitBreakerError('breaker open'))
         engine.producer.send_and_wait = AsyncMock(side_effect=RuntimeError("Kafka down"))
@@ -287,7 +287,7 @@ class TestFailSecure:
 
     @pytest.mark.asyncio
     async def test_fail_secure_rate_limit_alert_failure_safe(self, engine):
-        import asyncbreaker, redis_facade
+        from aiwaf.stream import asyncbreaker, redis_facade
         engine.facade.is_duplicate_and_add = AsyncMock(side_effect=asyncbreaker.CircuitBreakerError('breaker open'))
         engine.producer.send_and_wait = AsyncMock(side_effect=RuntimeError("Kafka down"))
         for _ in range(51):
@@ -295,7 +295,7 @@ class TestFailSecure:
 
     @pytest.mark.asyncio
     async def test_backup_buffer_appended_on_blacklist(self, engine):
-        import asyncbreaker, redis_facade
+        from aiwaf.stream import asyncbreaker, redis_facade
         engine.facade.is_duplicate_and_add = AsyncMock(side_effect=asyncbreaker.CircuitBreakerError('breaker open'))
         for _ in range(51):
             await engine.process_log(make_std_log(ip="10.10.10.10"))
@@ -303,14 +303,14 @@ class TestFailSecure:
 
     @pytest.mark.asyncio
     async def test_current_buffer_ip_check(self, engine):
-        import asyncbreaker, redis_facade
+        from aiwaf.stream import asyncbreaker, redis_facade
         redis_facade._current_buffer.append("11.11.11.11")
         engine.facade.is_duplicate_and_add = AsyncMock(side_effect=asyncbreaker.CircuitBreakerError('breaker open'))
         await engine.process_log(make_std_log(ip="11.11.11.11"))
 
     @pytest.mark.asyncio
     async def test_fail_secure_return_early_for_unknown_ip(self, engine):
-        import asyncbreaker
+        from aiwaf.stream import asyncbreaker
         engine.facade.is_duplicate_and_add = AsyncMock(side_effect=asyncbreaker.CircuitBreakerError('breaker open'))
         await engine.process_log(make_std_log(ip="50.50.50.50"))
 
@@ -337,11 +337,11 @@ class TestBatchAndDLQ:
     @pytest.fixture
     def engine(self):
         with patch('concurrent.futures.ProcessPoolExecutor', MagicMock()):
-            with patch('engine.AIOKafkaProducer', MagicMock()):
-                with patch('engine.AIOKafkaConsumer', MagicMock()):
-                    with patch('acl_bootstrap.init_worker'):
-                        with patch('acl_bootstrap.run_core_logic_batch_isolated'):
-                            from engine import AIWAFStreamEngine
+            with patch('aiwaf.stream.engine.AIOKafkaProducer', MagicMock()):
+                with patch('aiwaf.stream.engine.AIOKafkaConsumer', MagicMock()):
+                    with patch('aiwaf.stream.acl_bootstrap.init_worker'):
+                        with patch('aiwaf.stream.acl_bootstrap.run_core_logic_batch_isolated'):
+                            from aiwaf.stream.engine import AIWAFStreamEngine
                             import redis_facade
                             redis_facade.local_blacklist.clear()
                             redis_facade.local_rate_limit.clear()
@@ -375,7 +375,7 @@ class TestBatchAndDLQ:
 
     @pytest.mark.asyncio
     async def test_item_error_result_triggers_dlq(self, engine):
-        from acl_bootstrap import ItemErrorResult
+        from aiwaf.stream.acl_bootstrap import ItemErrorResult
         engine.facade = MagicMock()
         engine.facade.is_duplicate_and_add = AsyncMock(return_value=False)
         engine.facade.get_and_update_rate_limit = AsyncMock(return_value=[1.0])
@@ -393,7 +393,7 @@ class TestBatchAndDLQ:
 
     @pytest.mark.asyncio
     async def test_item_error_result_flushes_blocked_ips(self, engine):
-        from acl_bootstrap import ItemErrorResult
+        from aiwaf.stream.acl_bootstrap import ItemErrorResult
         engine.facade = MagicMock()
         engine.facade.is_duplicate_and_add = AsyncMock(return_value=False)
         engine.facade.get_and_update_rate_limit = AsyncMock(return_value=[1.0])
@@ -412,7 +412,7 @@ class TestBatchAndDLQ:
 
     @pytest.mark.asyncio
     async def test_keyword_refresh_handles_circuit_breaker_error(self, engine):
-        import asyncbreaker
+        from aiwaf.stream import asyncbreaker
         engine.facade.get_top_keywords = AsyncMock(side_effect=asyncbreaker.CircuitBreakerError('breaker open'))
         engine.dynamic_keywords_cache = ["old"]
         try:
@@ -441,7 +441,7 @@ class TestBatchAndDLQ:
 
     @pytest.mark.asyncio
     async def test_success_result_emits_rate_limit_alert(self, engine):
-        from acl_bootstrap import ItemSuccessResult
+        from aiwaf.stream.acl_bootstrap import ItemSuccessResult
         class FR: action = "flood_block"
         class FK: block_reason = None
         engine.facade = MagicMock()
@@ -461,7 +461,7 @@ class TestBatchAndDLQ:
 
     @pytest.mark.asyncio
     async def test_success_result_emits_keyword_alert(self, engine):
-        from acl_bootstrap import ItemSuccessResult
+        from aiwaf.stream.acl_bootstrap import ItemSuccessResult
         class FR: action = "pass"
         class FK: block_reason = "path_match:sqli"
         engine.facade = MagicMock()
@@ -481,7 +481,7 @@ class TestBatchAndDLQ:
 
     @pytest.mark.asyncio
     async def test_success_without_block_no_alert(self, engine):
-        from acl_bootstrap import ItemSuccessResult
+        from aiwaf.stream.acl_bootstrap import ItemSuccessResult
         class FR: action = "pass"
         class FK: block_reason = None
         engine.facade = MagicMock()
@@ -504,12 +504,12 @@ class TestBatchAndDLQ:
 
     @pytest.mark.asyncio
     async def test_concurrent_process_logs(self, engine):
-        import asyncbreaker
+        from aiwaf.stream import asyncbreaker
         engine.facade.is_duplicate_and_add = AsyncMock(return_value=False)
         engine.facade.get_and_update_rate_limit = AsyncMock(return_value=[1.0, 2.0])
         engine.batch_queue = asyncio.Queue()
 
-        from acl_bootstrap import ItemSuccessResult
+        from aiwaf.stream.acl_bootstrap import ItemSuccessResult
         class FR: action = "pass"
         class FK: block_reason = None
 
@@ -527,7 +527,7 @@ class TestBatchAndDLQ:
     async def test_start_creates_tasks(self, engine):
         engine.producer.start = AsyncMock()
         # Consumer is created in start(), mock it before calling
-        with patch('engine.AIOKafkaConsumer') as MockConsumer:
+        with patch('aiwaf.stream.engine.AIOKafkaConsumer') as MockConsumer:
             mock_instance = MockConsumer.return_value
             mock_instance.start = AsyncMock()
             await engine.start()
@@ -566,11 +566,11 @@ class TestSupplementaryEngine:
     @pytest.fixture
     def engine(self):
         with patch('concurrent.futures.ProcessPoolExecutor', MagicMock()):
-            with patch('engine.AIOKafkaProducer', MagicMock()):
-                with patch('engine.AIOKafkaConsumer', MagicMock()):
-                    with patch('acl_bootstrap.init_worker'):
-                        with patch('acl_bootstrap.run_core_logic_batch_isolated'):
-                            from engine import AIWAFStreamEngine
+            with patch('aiwaf.stream.engine.AIOKafkaProducer', MagicMock()):
+                with patch('aiwaf.stream.engine.AIOKafkaConsumer', MagicMock()):
+                    with patch('aiwaf.stream.acl_bootstrap.init_worker'):
+                        with patch('aiwaf.stream.acl_bootstrap.run_core_logic_batch_isolated'):
+                            from aiwaf.stream.engine import AIWAFStreamEngine
                             import redis_facade
                             redis_facade.local_blacklist.clear()
                             redis_facade.local_rate_limit.clear()
@@ -627,7 +627,7 @@ class TestSupplementaryEngine:
 
     @pytest.mark.asyncio
     async def test_fail_secure_multiple_ips_independent(self, engine):
-        import asyncbreaker, redis_facade
+        from aiwaf.stream import asyncbreaker, redis_facade
         engine.facade.is_duplicate_and_add = AsyncMock(side_effect=asyncbreaker.CircuitBreakerError('open'))
         engine.facade.get_and_update_rate_limit = None
         for _ in range(30):
@@ -639,7 +639,7 @@ class TestSupplementaryEngine:
 
     @pytest.mark.asyncio
     async def test_fail_secure_no_crash_during_high_load(self, engine):
-        import asyncbreaker
+        from aiwaf.stream import asyncbreaker
         engine.facade.is_duplicate_and_add = AsyncMock(side_effect=asyncbreaker.CircuitBreakerError('open'))
         engine.facade.get_and_update_rate_limit = None
         tasks = [engine.process_log(make_std_log(ip=f"10.0.0.{i}")) for i in range(20)]
@@ -662,7 +662,7 @@ class TestSupplementaryEngine:
 
     @pytest.mark.asyncio
     async def test_item_success_result_no_crash(self, engine):
-        from acl_bootstrap import ItemSuccessResult
+        from aiwaf.stream.acl_bootstrap import ItemSuccessResult
         class FR: action = "pass"
         class FK: block_reason = None
         sr = ItemSuccessResult("t", FR(), FK(), {'blocked_ips':[],'learned_keywords':[]})
@@ -697,7 +697,7 @@ class TestSupplementaryEngine:
         engine.facade.is_duplicate_and_add = AsyncMock(return_value=False)
         engine.facade.get_and_update_rate_limit = AsyncMock(return_value=[1.0])
         engine.batch_queue = asyncio.Queue()
-        from acl_bootstrap import ItemSuccessResult
+        from aiwaf.stream.acl_bootstrap import ItemSuccessResult
         class FR: action = "pass"
         class FK: block_reason = None
         async def d():
@@ -739,9 +739,9 @@ class TestDeepFailSecure:
     def engine(self):
         with patch('concurrent.futures.ProcessPoolExecutor', MagicMock()):
             with patch('aiokafka.AIOKafkaProducer', MagicMock()):
-                with patch('acl_bootstrap.init_worker'):
-                    with patch('acl_bootstrap.run_core_logic_batch_isolated'):
-                        from engine import AIWAFStreamEngine
+                with patch('aiwaf.stream.acl_bootstrap.init_worker'):
+                    with patch('aiwaf.stream.acl_bootstrap.run_core_logic_batch_isolated'):
+                        from aiwaf.stream.engine import AIWAFStreamEngine
                         import redis_facade
                         redis_facade.local_blacklist.clear()
                         redis_facade.local_rate_limit.clear()
@@ -754,7 +754,7 @@ class TestDeepFailSecure:
 
     @pytest.mark.asyncio
     async def test_rate_limit_exact_50_does_not_blacklist(self, engine):
-        import asyncbreaker, redis_facade
+        from aiwaf.stream import asyncbreaker, redis_facade
         engine.facade.is_duplicate_and_add = AsyncMock(side_effect=asyncbreaker.CircuitBreakerError('open'))
         for _ in range(50):
             await engine.process_log(make_std_log(ip="50tests"))
@@ -762,7 +762,7 @@ class TestDeepFailSecure:
 
     @pytest.mark.asyncio
     async def test_rate_limit_exact_51_does_blacklist(self, engine):
-        import asyncbreaker, redis_facade
+        from aiwaf.stream import asyncbreaker, redis_facade
         engine.facade.is_duplicate_and_add = AsyncMock(side_effect=asyncbreaker.CircuitBreakerError('open'))
         for _ in range(51):
             await engine.process_log(make_std_log(ip="51tests"))
@@ -770,14 +770,14 @@ class TestDeepFailSecure:
 
     @pytest.mark.asyncio
     async def test_blacklisted_ip_blocked_before_counter(self, engine):
-        import asyncbreaker, redis_facade
+        from aiwaf.stream import asyncbreaker, redis_facade
         redis_facade.local_blacklist["blocked-first"] = True
         engine.facade.is_duplicate_and_add = AsyncMock(side_effect=asyncbreaker.CircuitBreakerError('open'))
         await engine.process_log(make_std_log(ip="blocked-first"))
 
     @pytest.mark.asyncio
     async def test_blacklist_alert_sent(self, engine):
-        import asyncbreaker, redis_facade
+        from aiwaf.stream import asyncbreaker, redis_facade
         redis_facade.local_blacklist["alert-me"] = True
         engine.facade.is_duplicate_and_add = AsyncMock(side_effect=asyncbreaker.CircuitBreakerError('open'))
         engine.producer.send_and_wait.reset_mock()
@@ -786,7 +786,7 @@ class TestDeepFailSecure:
 
     @pytest.mark.asyncio
     async def test_rate_limit_alert_on_51st(self, engine):
-        import asyncbreaker, redis_facade
+        from aiwaf.stream import asyncbreaker, redis_facade
         engine.facade.is_duplicate_and_add = AsyncMock(side_effect=asyncbreaker.CircuitBreakerError('open'))
         engine.producer.send_and_wait.reset_mock()
         for _ in range(51):
@@ -795,7 +795,7 @@ class TestDeepFailSecure:
 
     @pytest.mark.asyncio
     async def test_multiple_ips_rate_limit_independent(self, engine):
-        import asyncbreaker, redis_facade
+        from aiwaf.stream import asyncbreaker, redis_facade
         engine.facade.is_duplicate_and_add = AsyncMock(side_effect=asyncbreaker.CircuitBreakerError('open'))
         for _ in range(51):
             await engine.process_log(make_std_log(ip="ip-a"))
@@ -806,14 +806,14 @@ class TestDeepFailSecure:
 
     @pytest.mark.asyncio
     async def test_buffer_ip_blocks(self, engine):
-        import asyncbreaker, redis_facade
+        from aiwaf.stream import asyncbreaker, redis_facade
         redis_facade._current_buffer.append("buffered-ip")
         engine.facade.is_duplicate_and_add = AsyncMock(side_effect=asyncbreaker.CircuitBreakerError('open'))
         await engine.process_log(make_std_log(ip="buffered-ip"))
 
     @pytest.mark.asyncio
     async def test_backup_buffer_ip_blocks(self, engine):
-        import asyncbreaker, redis_facade
+        from aiwaf.stream import asyncbreaker, redis_facade
         redis_facade._backup_buffer.append("backup-ip")
         engine.facade.is_duplicate_and_add = AsyncMock(side_effect=asyncbreaker.CircuitBreakerError('open'))
         await engine.process_log(make_std_log(ip="backup-ip"))
@@ -836,9 +836,9 @@ class TestDeepDLQ:
     def engine(self):
         with patch('concurrent.futures.ProcessPoolExecutor', MagicMock()):
             with patch('aiokafka.AIOKafkaProducer', MagicMock()):
-                with patch('acl_bootstrap.init_worker'):
-                    with patch('acl_bootstrap.run_core_logic_batch_isolated'):
-                        from engine import AIWAFStreamEngine
+                with patch('aiwaf.stream.acl_bootstrap.init_worker'):
+                    with patch('aiwaf.stream.acl_bootstrap.run_core_logic_batch_isolated'):
+                        from aiwaf.stream.engine import AIWAFStreamEngine
                         eng = AIWAFStreamEngine(MockSettings(), MockStateMgr(), "/f")
                         eng.producer.start = AsyncMock()
                         eng.producer.send_and_wait = AsyncMock()
@@ -902,9 +902,9 @@ class TestDeepConcurrency:
     def engine(self):
         with patch('concurrent.futures.ProcessPoolExecutor', MagicMock()):
             with patch('aiokafka.AIOKafkaProducer', MagicMock()):
-                with patch('acl_bootstrap.init_worker'):
-                    with patch('acl_bootstrap.run_core_logic_batch_isolated'):
-                        from engine import AIWAFStreamEngine
+                with patch('aiwaf.stream.acl_bootstrap.init_worker'):
+                    with patch('aiwaf.stream.acl_bootstrap.run_core_logic_batch_isolated'):
+                        from aiwaf.stream.engine import AIWAFStreamEngine
                         eng = AIWAFStreamEngine(MockSettings(), MockStateMgr(), "/f")
                         eng.producer.start = AsyncMock()
                         eng.producer.send_and_wait = AsyncMock()
@@ -915,7 +915,7 @@ class TestDeepConcurrency:
     async def test_concurrent_100_logs(self, engine):
         engine.facade.is_duplicate_and_add = AsyncMock(return_value=False)
         engine.facade.get_and_update_rate_limit = AsyncMock(return_value=[1.0])
-        from acl_bootstrap import ItemSuccessResult
+        from aiwaf.stream.acl_bootstrap import ItemSuccessResult
         class FR: action = "pass"
         class FK: block_reason = None
         async def dispatcher():
@@ -929,7 +929,7 @@ class TestDeepConcurrency:
 
     @pytest.mark.asyncio
     async def test_concurrent_mixed_results(self, engine):
-        from acl_bootstrap import ItemSuccessResult, ItemErrorResult
+        from aiwaf.stream.acl_bootstrap import ItemSuccessResult, ItemErrorResult
         class FR: action = "pass"
         class FK: block_reason = None
         counter = {"n":0}
@@ -951,7 +951,7 @@ class TestDeepConcurrency:
 
     @pytest.mark.asyncio
     async def test_concurrent_fail_secure(self, engine):
-        import asyncbreaker, redis_facade
+        from aiwaf.stream import asyncbreaker, redis_facade
         engine.facade.is_duplicate_and_add = AsyncMock(side_effect=asyncbreaker.CircuitBreakerError('open'))
         redis_facade.local_rate_limit.clear()
         tasks = [engine.process_log(make_std_log(ip=f"10.0.0.{i%10}")) for i in range(100)]
@@ -970,9 +970,9 @@ class TestDeepKeywordAndAlert:
     def engine(self):
         with patch('concurrent.futures.ProcessPoolExecutor', MagicMock()):
             with patch('aiokafka.AIOKafkaProducer', MagicMock()):
-                with patch('acl_bootstrap.init_worker'):
-                    with patch('acl_bootstrap.run_core_logic_batch_isolated'):
-                        from engine import AIWAFStreamEngine
+                with patch('aiwaf.stream.acl_bootstrap.init_worker'):
+                    with patch('aiwaf.stream.acl_bootstrap.run_core_logic_batch_isolated'):
+                        from aiwaf.stream.engine import AIWAFStreamEngine
                         eng = AIWAFStreamEngine(MockSettings(), MockStateMgr(), "/f")
                         eng.producer.start = AsyncMock()
                         eng.producer.send_and_wait = AsyncMock()
@@ -1041,7 +1041,7 @@ class TestDeepKeywordAndAlert:
         engine.facade.is_duplicate_and_add = AsyncMock(return_value=False)
         engine.facade.get_and_update_rate_limit = AsyncMock(return_value=[10.0, 20.0])
         engine.batch_queue = asyncio.Queue()
-        from acl_bootstrap import ItemSuccessResult
+        from aiwaf.stream.acl_bootstrap import ItemSuccessResult
         class FR: action = "pass"
         class FK: block_reason = None
         async def d():
@@ -1061,9 +1061,9 @@ class TestDeepEngineExtra:
     def engine(self):
         with patch('concurrent.futures.ProcessPoolExecutor', MagicMock()):
             with patch('aiokafka.AIOKafkaProducer', MagicMock()):
-                with patch('acl_bootstrap.init_worker'):
-                    with patch('acl_bootstrap.run_core_logic_batch_isolated'):
-                        from engine import AIWAFStreamEngine
+                with patch('aiwaf.stream.acl_bootstrap.init_worker'):
+                    with patch('aiwaf.stream.acl_bootstrap.run_core_logic_batch_isolated'):
+                        from aiwaf.stream.engine import AIWAFStreamEngine
                         import redis_facade
                         redis_facade.local_blacklist.clear()
                         redis_facade.local_rate_limit.clear()
@@ -1086,7 +1086,7 @@ class TestDeepEngineExtra:
         engine.facade.is_duplicate_and_add = AsyncMock(return_value=False)
         engine.facade.get_and_update_rate_limit = AsyncMock(return_value=[1.0])
         engine.batch_queue = asyncio.Queue()
-        from acl_bootstrap import ItemSuccessResult
+        from aiwaf.stream.acl_bootstrap import ItemSuccessResult
         class FR: action = "pass"
         class FK: block_reason = None
         async def d():
@@ -1104,7 +1104,7 @@ class TestDeepEngineExtra:
         engine.facade.get_and_update_rate_limit = AsyncMock(return_value=[100.0]*101)
         engine.facade.batch_block_ips = AsyncMock()
         engine.batch_queue = asyncio.Queue()
-        from acl_bootstrap import ItemSuccessResult
+        from aiwaf.stream.acl_bootstrap import ItemSuccessResult
         class FD: action = "flood_block"
         class FK: block_reason = None
         async def d():
@@ -1124,7 +1124,7 @@ class TestDeepEngineExtra:
         engine.facade.get_and_update_rate_limit = AsyncMock(return_value=[1.0])
         engine.facade.batch_block_ips = AsyncMock()
         engine.batch_queue = asyncio.Queue()
-        from acl_bootstrap import ItemSuccessResult
+        from aiwaf.stream.acl_bootstrap import ItemSuccessResult
         class FR: action = "pass"
         class FK: block_reason = "sqli"
         async def d():
@@ -1143,7 +1143,7 @@ class TestDeepEngineExtra:
         engine.facade.get_and_update_rate_limit = AsyncMock(return_value=[1.0])
         engine.facade.batch_add_keywords = AsyncMock()
         engine.batch_queue = asyncio.Queue()
-        from acl_bootstrap import ItemSuccessResult
+        from aiwaf.stream.acl_bootstrap import ItemSuccessResult
         class FR: action = "pass"
         class FK: block_reason = None
         async def d():
@@ -1161,7 +1161,7 @@ class TestDeepEngineExtra:
         engine.facade.is_duplicate_and_add = AsyncMock(return_value=False)
         engine.facade.get_and_update_rate_limit = AsyncMock(return_value=[1.0])
         engine.batch_queue = asyncio.Queue()
-        from acl_bootstrap import ItemErrorResult
+        from aiwaf.stream.acl_bootstrap import ItemErrorResult
         async def d():
             item = await engine.batch_queue.get()
             item['future'].set_result(ItemErrorResult("t","Err","msg",{'blocked_ips':[]}))
@@ -1171,7 +1171,7 @@ class TestDeepEngineExtra:
 
     @pytest.mark.asyncio
     async def test_breaker_open_skips_redis(self, engine):
-        import asyncbreaker, redis_facade
+        from aiwaf.stream import asyncbreaker, redis_facade
         engine.facade.is_duplicate_and_add = AsyncMock(side_effect=asyncbreaker.CircuitBreakerError('open'))
         rl_before = redis_facade.local_rate_limit.get("breaker-test", 0)
         await engine.process_log(make_std_log(ip="breaker-test"))
@@ -1179,7 +1179,7 @@ class TestDeepEngineExtra:
 
     @pytest.mark.asyncio
     async def test_fail_secure_rate_limit_closed_loop(self, engine):
-        import asyncbreaker, redis_facade
+        from aiwaf.stream import asyncbreaker, redis_facade
         redis_facade.local_blacklist.clear()
         redis_facade.local_rate_limit.clear()
         engine.facade.is_duplicate_and_add = AsyncMock(side_effect=asyncbreaker.CircuitBreakerError('open'))
@@ -1189,7 +1189,7 @@ class TestDeepEngineExtra:
 
     @pytest.mark.asyncio
     async def test_concurrent_breaker_open(self, engine):
-        import asyncbreaker, redis_facade
+        from aiwaf.stream import asyncbreaker, redis_facade
         redis_facade.local_blacklist.clear()
         engine.facade.is_duplicate_and_add = AsyncMock(side_effect=asyncbreaker.CircuitBreakerError('open'))
         redis_facade.local_rate_limit.clear()
@@ -1216,7 +1216,7 @@ class TestDeepEngineExtra:
 
     @pytest.mark.asyncio
     async def test_full_flow_non_blocking(self, engine):
-        from acl_bootstrap import ItemSuccessResult
+        from aiwaf.stream.acl_bootstrap import ItemSuccessResult
         class FR: action = "pass"
         class FK: block_reason = None
         engine.facade = MagicMock()
@@ -1243,9 +1243,9 @@ class TestFinalEngine:
     def engine(self):
         with patch('concurrent.futures.ProcessPoolExecutor', MagicMock()):
             with patch('aiokafka.AIOKafkaProducer', MagicMock()):
-                with patch('acl_bootstrap.init_worker'):
-                    with patch('acl_bootstrap.run_core_logic_batch_isolated'):
-                        from engine import AIWAFStreamEngine
+                with patch('aiwaf.stream.acl_bootstrap.init_worker'):
+                    with patch('aiwaf.stream.acl_bootstrap.run_core_logic_batch_isolated'):
+                        from aiwaf.stream.engine import AIWAFStreamEngine
                         import redis_facade
                         redis_facade.local_blacklist.clear()
                         redis_facade.local_rate_limit.clear()
@@ -1263,7 +1263,7 @@ class TestFinalEngine:
         engine.facade.is_duplicate_and_add = AsyncMock(return_value=False)
         engine.facade.get_and_update_rate_limit = AsyncMock(return_value=[1.0])
         engine.batch_queue = asyncio.Queue()
-        from acl_bootstrap import ItemSuccessResult
+        from aiwaf.stream.acl_bootstrap import ItemSuccessResult
         class FR: action = "pass"
         class FK: block_reason = None
         async def d():
@@ -1275,7 +1275,7 @@ class TestFinalEngine:
 
     @pytest.mark.asyncio
     async def test_breaker_state_transition(self, engine):
-        import asyncbreaker
+        from aiwaf.stream import asyncbreaker
         engine.facade.is_duplicate_and_add = AsyncMock(side_effect=asyncbreaker.CircuitBreakerError('open'))
         await engine.process_log(make_std_log())
         engine.facade.is_duplicate_and_add = AsyncMock(return_value=False)
@@ -1308,7 +1308,7 @@ class TestFinalEngine:
 
     @pytest.mark.asyncio
     async def test_process_log_full_fail_secure_flow(self, engine):
-        import asyncbreaker, redis_facade
+        from aiwaf.stream import asyncbreaker, redis_facade
         redis_facade.local_blacklist.clear()
         redis_facade.local_rate_limit.clear()
         engine.facade.is_duplicate_and_add = AsyncMock(side_effect=asyncbreaker.CircuitBreakerError('open'))
@@ -1318,7 +1318,7 @@ class TestFinalEngine:
 
     @pytest.mark.asyncio
     async def test_concurrent_flood_detection(self, engine):
-        import asyncbreaker, redis_facade
+        from aiwaf.stream import asyncbreaker, redis_facade
         redis_facade.local_rate_limit.clear()
         redis_facade.local_blacklist.clear()
         engine.facade.is_duplicate_and_add = AsyncMock(side_effect=asyncbreaker.CircuitBreakerError('open'))
