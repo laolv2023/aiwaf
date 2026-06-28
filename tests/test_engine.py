@@ -57,6 +57,7 @@ class MockSettings:
     kafka_retry_interval: int = 5
     auto_block_enabled: bool = True
     auto_learn_keywords: bool = True
+    path_rules: str = ""
 
 
 class MockStateMgr:
