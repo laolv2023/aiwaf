@@ -98,6 +98,21 @@ class Settings:
     header_suspicious_ua: str = ""             # 自定义可疑 UA 模式（逗号分隔，空=用默认）
     header_legitimate_bots: str = ""           # 合法爬虫 UA（逗号分隔，空=用默认）
 
+    # AI 异常检测
+    ai_min_logs: int = 50                      # 最小训练样本数（不足则跳过 AI 训练）
+    ai_contamination: float = 0.05             # IsolationForest 污染率（异常比例）
+    ai_n_estimators: int = 100                 # IsolationForest 树数
+    ai_max_samples: str = "auto"               # IsolationForest 最大样本数
+
+    # 蜜罐时序检测
+    honeypot_ttl: int = 300                    # 蜜罐 GET 时间戳 TTL（秒）
+
+    # 关键词策略
+    keyword_min_segment_length: int = 3        # 路径段最小长度（短于此不参与关键词检测）
+
+    # Redis 同步
+    background_sync_interval: int = 5          # 后台同步 Worker 间隔（秒）
+
     @classmethod
     def from_yaml(cls, path: str) -> "Settings":
         """从 YAML 配置文件加载"""
@@ -172,6 +187,13 @@ class Settings:
             "header_max_accept_length":    "HEADER_MAX_ACCEPT_LENGTH",
             "header_suspicious_ua":        "HEADER_SUSPICIOUS_UA",
             "header_legitimate_bots":      "HEADER_LEGITIMATE_BOTS",
+            "ai_min_logs":                 "AI_MIN_LOGS",
+            "ai_contamination":            "AI_CONTAMINATION",
+            "ai_n_estimators":             "AI_N_ESTIMATORS",
+            "ai_max_samples":              "AI_MAX_SAMPLES",
+            "honeypot_ttl":                "HONEYPOT_TTL",
+            "keyword_min_segment_length":  "KEYWORD_MIN_SEGMENT_LENGTH",
+            "background_sync_interval":    "BACKGROUND_SYNC_INTERVAL",
         }
 
         int_fields = {
@@ -185,7 +207,17 @@ class Settings:
             "circuit_breaker_fail_max", "circuit_breaker_timeout",
             "max_pending_ips", "max_body_hash_bytes", "max_body_store_bytes",
             "header_max_ua_length", "header_max_accept_length",
+            "ai_min_logs", "ai_n_estimators",
+            "honeypot_ttl", "keyword_min_segment_length",
+            "background_sync_interval",
         }
+
+        float_fields = {
+            "ai_contamination",
+        }
+
+        # int_fields 需要 int 转换，float_fields 需要 float 转换
+        # bool_fields 需要布尔转换
 
         bool_fields = {
             "kafka_enable_idempotence",
@@ -197,6 +229,8 @@ class Settings:
                 try:
                     if attr in int_fields:
                         val = int(val)
+                    elif attr in float_fields:
+                        val = float(val)
                     elif attr in bool_fields:
                         val = val.lower() in ("true", "1", "yes", "on")
                     setattr(settings, attr, val)
