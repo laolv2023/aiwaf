@@ -31,9 +31,9 @@ if _orig_root not in sys.path:
 # ---------------------------------------------------------------------------
 # Import our project modules normally
 # ---------------------------------------------------------------------------
-from preprocessor import transform_raw_log
+from aiwaf.stream.preprocessor import transform_raw_log
 from train_pipeline import _process_row_purifier
-from acl_bootstrap import _default_malicious_context
+from aiwaf.stream.acl_bootstrap import _default_malicious_context
 
 # ---------------------------------------------------------------------------
 # Load the two core modules via importlib with distinct names
