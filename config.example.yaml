@@ -74,3 +74,20 @@ max_pending_ips: 10000               # 待同步 IP 缓冲最大长度
 # ── Body 截断 ──
 max_body_hash_bytes: 10485760        # Body 哈希截断阈值（字节，默认 10MB）
 max_body_store_bytes: 1024           # Body 存储截断阈值（字节，默认 1KB）
+
+# ── 请求头验证 ──
+# 必需头（逗号分隔，空=不检查必需头）
+# 默认要求 user-agent 和 accept，内网 API 场景可设为空或自定义
+header_required: "user-agent,accept"
+# 跳过请求头检查的 IP/CIDR（逗号分隔，支持 CIDR 如 192.168.0.0/16）
+header_skip_ips: ""
+# 跳过请求头检查的路径前缀（逗号分隔）
+header_skip_paths: ""
+# User-Agent 最大长度
+header_max_ua_length: 500
+# Accept 最大长度
+header_max_accept_length: 4096
+# 自定义可疑 UA 模式（逗号分隔，空=用内置默认列表 curl,wget,python,...）
+header_suspicious_ua: ""
+# 合法爬虫 UA（逗号分隔，空=用内置默认列表 googlebot,bingbot,...）
+header_legitimate_bots: ""
