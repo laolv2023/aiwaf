@@ -21,6 +21,10 @@ from aiwaf.core.rate_limit import FLOOD_BLOCK
 from akto_adapter import parse_akto_json_message
 from preprocessor import transform_raw_log
 from aiwaf.core.path_manifest import PathManifest
+from aiwaf.core.header_validation import evaluate_header_policy
+from aiwaf.core.uuid_tamper import record_uuid_signal, is_malformed_uuid, collect_uuid_model_fields
+from aiwaf.core.geo_policy import evaluate_geo_policy
+from aiwaf.core.geoip import lookup_country_name, GEOIP_AVAILABLE
 
 METRIC_ENGINE_IN = Counter('aiwaf_engine_in_total', 'Logs received')
 METRIC_DLQ_OUT = Counter('aiwaf_dlq_out_total', 'Messages routed to DLQ')
@@ -176,6 +180,52 @@ class AIWAFStreamEngine:
             method=std_log.get("method", "GET"),
             status_code=std_log.get("status_code", 0),
         )
+
+        # ── 请求头验证 ──
+        raw_headers = std_log.get("request_headers", "")
+        if raw_headers:
+            try:
+                headers_dict = orjson.loads(raw_headers) if isinstance(raw_headers, str) else raw_headers
+                # 转为 WSGI environ 格式（evaluate_header_policy 期望的输入）
+                environ = {}
+                for k, v in headers_dict.items():
+                    wsgi_key = f"HTTP_{k.upper().replace('-', '_')}"
+                    environ[wsgi_key] = v or ""
+                header_dec = evaluate_header_policy(environ, method=std_log.get("method", "GET"))
+                if header_dec and header_dec.block:
+                    await self._emit_alert(std_log, f"HeaderBlock:{header_dec.reason}")
+                    return
+            except Exception:
+                pass
+
+        # ── UUID 篡改检测 ──
+        uri_path = std_log.get("uri_path", "")
+        path_segments = uri_path.strip("/").split("/")
+        for seg in path_segments:
+            if is_malformed_uuid(seg):
+                try:
+                    record_uuid_signal(ip, "malformed_uuid")
+                    await self._emit_alert(std_log, "UUIDTamper:malformed_uuid")
+                except Exception:
+                    pass
+                break
+
+        # ── 地理围栏 (GeoIP) ──
+        if self.settings.geoip_db_path and GEOIP_AVAILABLE:
+            try:
+                country = lookup_country_name(ip, self.settings.geoip_db_path)
+                if country:
+                    geo_dec = evaluate_geo_policy(
+                        country=country,
+                        allow_countries=set(self.settings.geo_allow_countries.split(",")) if self.settings.geo_allow_countries else set(),
+                        block_countries=set(self.settings.geo_block_countries.split(",")) if self.settings.geo_block_countries else set(),
+                        dynamic_blocked=[],
+                    )
+                    if geo_dec.block:
+                        await self._emit_alert(std_log, f"GeoBlock:{country}")
+                        return
+            except Exception:
+                pass
 
         redis_available = True
         try:
