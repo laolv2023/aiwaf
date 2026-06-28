@@ -1,0 +1,61 @@
+"""Shared request-method validation policy.
+
+Ported from aiwaf-project/aiwaf, adapted for stream processing (no framework routes).
+Only evaluate_method_policy is retained; Flask/FastAPI route detection removed.
+"""
+from dataclasses import dataclass
+from typing import Optional
+
+from .honeypot import should_block_get_to_post_only_endpoint
+
+
+ACTION_ALLOW = "allow"
+ACTION_BLOCK = "block"
+
+
+@dataclass(frozen=True)
+class MethodDecision:
+    action: str
+    reason: Optional[str] = None
+    status_code: int = 405
+    message: Optional[str] = None
+
+
+def evaluate_method_policy(
+    *,
+    method: str,
+    path: str,
+    accepts_get: bool = False,
+    accepts_post: bool = False,
+    accepts_method: bool = False,
+) -> MethodDecision:
+    """
+    Evaluate request method against endpoint policy.
+
+    In stream mode, accepts_get/post/method default to False (unknown).
+    This means GET to /create/, /submit/ etc. will be flagged.
+    """
+    method_u = (method or "").upper()
+    if method_u == "GET":
+        if should_block_get_to_post_only_endpoint(path, accepts_get=False):
+            return MethodDecision(
+                action=ACTION_BLOCK,
+                reason=f"GET to obvious POST-only endpoint: {path}",
+                message=f"GET not allowed for {path}",
+            )
+        return MethodDecision(action=ACTION_ALLOW)
+
+    if method_u == "POST":
+        return MethodDecision(action=ACTION_ALLOW)
+
+    if method_u in {"HEAD", "OPTIONS"}:
+        return MethodDecision(action=ACTION_ALLOW)
+
+    if not accepts_method:
+        return MethodDecision(
+            action=ACTION_BLOCK,
+            reason=f"{method_u} to view that doesn't support it: {path}",
+            message=f"{method_u} not allowed for {path}",
+        )
+
+    return MethodDecision(action=ACTION_ALLOW)
