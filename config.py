@@ -177,10 +177,13 @@ class Settings:
         for attr, env_key in env_map.items():
             val = os.getenv(env_key)
             if val is not None:
-                if attr in int_fields:
-                    val = int(val)
-                elif attr in bool_fields:
-                    val = val.lower() in ("true", "1", "yes", "on")
-                setattr(settings, attr, val)
+                try:
+                    if attr in int_fields:
+                        val = int(val)
+                    elif attr in bool_fields:
+                        val = val.lower() in ("true", "1", "yes", "on")
+                    setattr(settings, attr, val)
+                except (ValueError, TypeError):
+                    pass  # 非法值保留 YAML/默认值
 
         return settings
