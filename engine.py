@@ -233,10 +233,16 @@ class AIWAFStreamEngine:
             except Exception:
                 pass
 
+        # ── 路径豁免检查（配置 + 运行时 Redis）──
+        uri_path = std_log.get("uri_path", "")
+        skip_paths = [s.strip() for s in self.settings.header_skip_paths.split(",") if s.strip()]
+        for prefix in skip_paths:
+            if uri_path.startswith(prefix):
+                return  # 豁免路径跳过所有检测
+
         # ── UUID 篡改检测 ──
         # 仅检测格式接近 UUID（36 字符含 dash）但解析失败的段
         # 避免对普通路径段误报
-        uri_path = std_log.get("uri_path", "")
         path_segments = uri_path.strip("/").split("/")
         for seg in path_segments:
             # 只检查 36 字符且含 dash 的段（UUID 格式特征）
@@ -293,8 +299,9 @@ class AIWAFStreamEngine:
 
             local_rate_limit[ip] = local_rate_limit.get(ip, 0) + 1
             if local_rate_limit[ip] > self.settings.fail_secure_local_limit:
-                local_blacklist[ip] = True
-                _backup_buffer.append(ip)
+                if self.settings.auto_block_enabled:
+                    local_blacklist[ip] = True
+                    _backup_buffer.append(ip)
                 try:
                     await self._emit_alert(std_log, "Local_RateLimit_Block")
                 except Exception:
@@ -318,7 +325,7 @@ class AIWAFStreamEngine:
             return
 
         if isinstance(result, ItemErrorResult):
-            if redis_available and result.side_effects.get('blocked_ips'):
+            if redis_available and self.settings.auto_block_enabled and result.side_effects.get('blocked_ips'):
                 asyncio.create_task(self.facade.batch_block_ips(result.side_effects.get('blocked_ips', [])))
             try:
                 await self._route_to_dlq(std_log, Exception(f"{result.error_type}: {result.error_msg}"))
@@ -327,9 +334,9 @@ class AIWAFStreamEngine:
             return
 
         if redis_available:
-            if result.side_effects.get('blocked_ips'):
+            if self.settings.auto_block_enabled and result.side_effects.get('blocked_ips'):
                 asyncio.create_task(self.facade.batch_block_ips(result.side_effects.get('blocked_ips', [])))
-            if result.side_effects.get('learned_keywords'):
+            if self.settings.auto_learn_keywords and result.side_effects.get('learned_keywords'):
                 asyncio.create_task(self._batch_add_keywords(result.side_effects.get('learned_keywords', [])))
 
         if result.rl_decision.action == FLOOD_BLOCK:
