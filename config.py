@@ -40,6 +40,12 @@ class Settings:
     # 进程池
     core_process_pool_size: int = 4
 
+    # 速率限制
+    rate_limit_window: int = 60           # 窗口大小（秒）
+    rate_limit_max_requests: int = 100    # 窗口内最大请求数
+    rate_limit_flood_threshold: int = 150 # 洪泛检测阈值
+    fail_secure_local_limit: int = 50     # Redis 不可用时的本地降级阈值
+
     @classmethod
     def from_env(cls) -> "Settings":
         """从环境变量加载配置"""
@@ -51,4 +57,8 @@ class Settings:
             dlq_topic=os.getenv("KAFKA_DLQ_TOPIC", "akto.aiwaf.dlq"),
             consumer_group=os.getenv("KAFKA_CONSUMER_GROUP", "aiwaf-consumer-group"),
             core_process_pool_size=int(os.getenv("CORE_PROCESS_POOL_SIZE", "4")),
+            rate_limit_window=int(os.getenv("RATE_LIMIT_WINDOW", "60")),
+            rate_limit_max_requests=int(os.getenv("RATE_LIMIT_MAX_REQUESTS", "100")),
+            rate_limit_flood_threshold=int(os.getenv("RATE_LIMIT_FLOOD_THRESHOLD", "150")),
+            fail_secure_local_limit=int(os.getenv("FAIL_SECURE_LOCAL_LIMIT", "50")),
         )
