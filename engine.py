@@ -167,7 +167,7 @@ class AIWAFStreamEngine:
                 self.core_executor.shutdown(wait=False, cancel_futures=True)
                 self.core_executor = ProcessPoolExecutor(
                     max_workers=self.settings.core_process_pool_size,
-                    max_tasks_per_child=200,
+                    max_tasks_per_child=self.settings.max_tasks_per_child,
                     initializer=init_worker,
                     initargs=(self.model_path,)
                 )
@@ -204,7 +204,10 @@ class AIWAFStreamEngine:
                     environ[wsgi_key] = v or ""
                 header_dec = evaluate_header_policy(environ, method=std_log.get("method", "GET"))
                 if header_dec and header_dec.block:
-                    await self._emit_alert(std_log, f"HeaderBlock:{header_dec.reason}")
+                    try:
+                        await self._emit_alert(std_log, f"HeaderBlock:{header_dec.reason}")
+                    except Exception:
+                        pass
                     return
             except Exception:
                 pass
@@ -228,12 +231,15 @@ class AIWAFStreamEngine:
                 if country:
                     geo_dec = evaluate_geo_policy(
                         country=country,
-                        allow_countries=set(self.settings.geo_allow_countries.split(",")) if self.settings.geo_allow_countries else set(),
-                        block_countries=set(self.settings.geo_block_countries.split(",")) if self.settings.geo_block_countries else set(),
+                        allow_countries=set(s for s in self.settings.geo_allow_countries.split(",") if s) if self.settings.geo_allow_countries else set(),
+                        block_countries=set(s for s in self.settings.geo_block_countries.split(",") if s) if self.settings.geo_block_countries else set(),
                         dynamic_blocked=[],
                     )
                     if geo_dec.block:
-                        await self._emit_alert(std_log, f"GeoBlock:{country}")
+                        try:
+                            await self._emit_alert(std_log, f"GeoBlock:{country}")
+                        except Exception:
+                            pass
                         return
             except Exception:
                 pass
@@ -342,7 +348,10 @@ class AIWAFStreamEngine:
             "severity": self._classify_severity(rule),
             "req_body_truncated": std_log.get("req_body_truncated", ""),
         }
-        await self.producer.send_and_wait(self.settings.alert_topic, orjson.dumps(alert))
+        try:
+            await self.producer.send_and_wait(self.settings.alert_topic, orjson.dumps(alert))
+        except Exception:
+            pass
 
     def _classify_severity(self, rule: str) -> str:
         """根据规则名称分类严重程度"""
@@ -353,6 +362,12 @@ class AIWAFStreamEngine:
             return "HIGH"
         if "blacklist" in rule_lower:
             return "HIGH"
+        if "header" in rule_lower:
+            return "HIGH"
+        if "uuid" in rule_lower:
+            return "HIGH"
+        if "geo" in rule_lower:
+            return "MEDIUM"
         return "LOW"
 
     async def _consume_loop(self):
@@ -363,7 +378,7 @@ class AIWAFStreamEngine:
                     for msg in batch:
                         try:
                             # JSON → raw_log dict
-                            raw_log = parse_akto_json_message(msg.value.decode('utf-8'))
+                            raw_log = parse_akto_json_message(msg.value.decode('utf-8', errors='replace'))
                             # raw_log → std_log (生成 trace_id, 拆分 query, 截断 body)
                             std_log = transform_raw_log(raw_log)
                             await self.process_log(std_log)
@@ -401,7 +416,7 @@ class AIWAFStreamEngine:
             except Exception:
                 # 消费循环异常（如 Kafka rebalance），等待后重试
                 try:
-                    await asyncio.sleep(5)
+                    await asyncio.sleep(self.settings.circuit_breaker_timeout)
                 except asyncio.CancelledError:
                     break
 
@@ -413,4 +428,7 @@ class AIWAFStreamEngine:
             "error_type": type(error).__name__,
             "raw_log": std_log
         }
-        await self.producer.send_and_wait(self.settings.dlq_topic, orjson.dumps(dlq_payload))
+        try:
+            await self.producer.send_and_wait(self.settings.dlq_topic, orjson.dumps(dlq_payload))
+        except Exception:
+            pass
