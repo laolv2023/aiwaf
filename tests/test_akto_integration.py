@@ -445,6 +445,7 @@ class MockSettings:
     max_pending_ips: int = 10000
     max_body_hash_bytes: int = 10485760
     max_body_store_bytes: int = 1024
+    kafka_retry_interval: int = 5
 
 
 class MockStateMgr:
