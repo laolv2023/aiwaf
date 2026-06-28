@@ -8,7 +8,7 @@ import sys
 import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from acl_bootstrap import (
+from aiwaf.stream.acl_bootstrap import (
     ProcessLocalCollector, ItemErrorResult, ItemSuccessResult,
     run_core_logic_batch_isolated, _collector
 )
@@ -138,7 +138,7 @@ class TestRunCoreLogicBatchIsolated:
     """子进程批处理入口测试"""
 
     def _make_std_log(self, trace_id="tid-001", ip="1.1.1.1", uri="/api", body=""):
-        from preprocessor import generate_deterministic_trace_id
+        from aiwaf.stream.preprocessor import generate_deterministic_trace_id
         std = {"client_ip": ip, "uri_path": uri, "timestamp": 1000.0,
                "query_keys": [], "query_strings": [], "request_body": body}
         std["trace_id"] = trace_id or generate_deterministic_trace_id(std)
@@ -246,7 +246,7 @@ class TestSideEffectPreservation:
         return orjson.dumps(std)
 
     def test_collector_is_module_level_global(self):
-        import acl_bootstrap
+        from aiwaf.stream import acl_bootstrap
         assert acl_bootstrap._collector is not None
 
     def test_extract_and_clear_between_batches(self):
