@@ -85,8 +85,13 @@ def _make_is_malicious_context(status_code: int):
 def init_worker(model_path: str):
     """ProcessPoolExecutor 的 initializer，在子进程启动时加载 AI 模型"""
     global _local_model
-    import joblib
-    _local_model = joblib.load(model_path)
+    if not model_path:
+        return
+    try:
+        import joblib
+        _local_model = joblib.load(model_path)
+    except Exception:
+        _local_model = None
 
 
 def run_core_logic_batch_isolated(
