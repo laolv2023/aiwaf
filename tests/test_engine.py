@@ -55,6 +55,8 @@ class MockSettings:
     max_body_hash_bytes: int = 10485760
     max_body_store_bytes: int = 1024
     kafka_retry_interval: int = 5
+    auto_block_enabled: bool = True
+    auto_learn_keywords: bool = True
 
 
 class MockStateMgr:
