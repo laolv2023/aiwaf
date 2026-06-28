@@ -193,8 +193,9 @@ class AIWAFStreamEngine:
         )
 
         # ── 请求头验证 ──
+        # 跳过豁免 IP（支持 CIDR）
         raw_headers = std_log.get("request_headers", "")
-        if raw_headers:
+        if raw_headers and self._should_check_header(ip, uri_path):
             try:
                 headers_dict = orjson.loads(raw_headers) if isinstance(raw_headers, str) else raw_headers
                 # 转为 WSGI environ 格式（evaluate_header_policy 期望的输入）
@@ -202,7 +203,24 @@ class AIWAFStreamEngine:
                 for k, v in headers_dict.items():
                     wsgi_key = f"HTTP_{k.upper().replace('-', '_')}"
                     environ[wsgi_key] = v or ""
-                header_dec = evaluate_header_policy(environ, method=std_log.get("method", "GET"))
+
+                # 从配置构建必需头列表
+                required = [f"HTTP_{h.strip().upper().replace('-', '_')}"
+                            for h in self.settings.header_required.split(",") if h.strip()] or None
+
+                # 自定义可疑 UA / 合法爬虫
+                suspicious_ua = self.settings.header_suspicious_ua.split(",") if self.settings.header_suspicious_ua else None
+                legit_bots = self.settings.header_legitimate_bots.split(",") if self.settings.header_legitimate_bots else None
+
+                header_dec = evaluate_header_policy(
+                    environ,
+                    method=std_log.get("method", "GET"),
+                    config_required_headers=required,
+                    max_user_agent_length=self.settings.header_max_ua_length,
+                    max_accept_length=self.settings.header_max_accept_length,
+                    suspicious_user_agents=suspicious_ua,
+                    legitimate_bots=legit_bots,
+                )
                 if header_dec:  # 返回字符串=block reason, None=允许
                     try:
                         await self._emit_alert(std_log, f"HeaderBlock:{header_dec}")
@@ -358,6 +376,30 @@ class AIWAFStreamEngine:
             await self.producer.send_and_wait(self.settings.alert_topic, orjson.dumps(alert))
         except Exception:
             pass
+
+    def _should_check_header(self, ip: str, path: str) -> bool:
+        """判断是否需要对该 IP/路径进行请求头检查"""
+        # 检查豁免 IP（支持 CIDR）
+        skip_ips = [s.strip() for s in self.settings.header_skip_ips.split(",") if s.strip()]
+        if skip_ips:
+            try:
+                import ipaddress
+                addr = ipaddress.ip_address(ip)
+                for cidr in skip_ips:
+                    if addr in ipaddress.ip_network(cidr, strict=False):
+                        return False
+            except (ValueError, OSError):
+                # IP 解析失败或 CIDR 格式错误，按精确匹配
+                if ip in skip_ips:
+                    return False
+
+        # 检查豁免路径前缀
+        skip_paths = [s.strip() for s in self.settings.header_skip_paths.split(",") if s.strip()]
+        for prefix in skip_paths:
+            if path.startswith(prefix):
+                return False
+
+        return True
 
     def _classify_severity(self, rule: str) -> str:
         """根据规则名称分类严重程度"""
