@@ -203,9 +203,9 @@ class AIWAFStreamEngine:
                     wsgi_key = f"HTTP_{k.upper().replace('-', '_')}"
                     environ[wsgi_key] = v or ""
                 header_dec = evaluate_header_policy(environ, method=std_log.get("method", "GET"))
-                if header_dec and header_dec.block:
+                if header_dec:  # 返回字符串=block reason, None=允许
                     try:
-                        await self._emit_alert(std_log, f"HeaderBlock:{header_dec.reason}")
+                        await self._emit_alert(std_log, f"HeaderBlock:{header_dec}")
                     except Exception:
                         pass
                     return
@@ -213,13 +213,19 @@ class AIWAFStreamEngine:
                 pass
 
         # ── UUID 篡改检测 ──
+        # 仅检测格式接近 UUID（36 字符含 dash）但解析失败的段
+        # 避免对普通路径段误报
         uri_path = std_log.get("uri_path", "")
         path_segments = uri_path.strip("/").split("/")
         for seg in path_segments:
-            if is_malformed_uuid(seg):
+            # 只检查 36 字符且含 dash 的段（UUID 格式特征）
+            if len(seg) == 36 and seg.count('-') >= 4 and is_malformed_uuid(seg):
                 try:
                     record_uuid_signal(ip, "malformed_uuid")
-                    await self._emit_alert(std_log, "UUIDTamper:malformed_uuid")
+                    try:
+                        await self._emit_alert(std_log, "UUIDTamper:malformed_uuid")
+                    except Exception:
+                        pass
                 except Exception:
                     pass
                 break
