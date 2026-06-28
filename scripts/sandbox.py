@@ -358,8 +358,147 @@ async def run_sandbox(mode: str = "all"):
 def main():
     parser = argparse.ArgumentParser(description="AIWAF-Stream Sandbox — 基准测试")
     parser.add_argument("--mode", default="all", choices=["normal", "attacks", "all"])
+    parser.add_argument("--local", action="store_true", help="本地模拟模式（不需要 Kafka/Redis）")
     args = parser.parse_args()
-    asyncio.run(run_sandbox(args.mode))
+
+    if args.local:
+        asyncio.run(run_sandbox_local(args.mode))
+    else:
+        asyncio.run(run_sandbox(args.mode))
+
+
+async def run_sandbox_local(mode: str = "all"):
+    """
+    本地模拟模式：不走 Kafka/Redis，直接在内存中调用 AIWAF 检测管道。
+
+    适用于：
+    - 无 Kafka/Redis 环境的开发机
+    - 快速验证检测能力
+    - CI/CD 流水线中的回归测试
+    """
+    from aiwaf.stream.akto_adapter import parse_akto_json_message
+    from aiwaf.stream.preprocessor import transform_raw_log
+    from aiwaf.core.path_manifest import PathManifest
+    from aiwaf.core.malicious_context import is_malicious_context, STATIC_KW, DEFAULT_LEGITIMATE_KEYWORDS
+    from aiwaf.core.ip_keyword import evaluate_keyword_policy
+    from aiwaf.core.header_validation import evaluate_header_policy
+    from aiwaf.core.uuid_tamper import is_malformed_uuid
+    from aiwaf.core.method_validation import evaluate_method_policy
+    import orjson
+
+    print(f"{'=' * 70}")
+    print(f"  AIWAF-Stream Sandbox — 本地模拟模式")
+    print(f"  Mode: {mode}")
+    print(f"{'=' * 70}\n")
+
+    pm = PathManifest()
+    results: List[AttackResult] = []
+
+    def process_message(msg: Dict[str, Any]) -> Optional[str]:
+        """处理单条消息，返回告警 rule_id 或 None"""
+        try:
+            msg_json = orjson.dumps(msg).decode()
+            raw_log = parse_akto_json_message(msg_json)
+            std_log = transform_raw_log(raw_log)
+
+            uri_path = std_log.get("uri_path", "")
+            method = std_log.get("method", "GET")
+            status_code = std_log.get("status_code", 0)
+            ip = std_log.get("client_ip", "")
+
+            pm.record(uri_path, method, status_code)
+
+            # Header 验证
+            rh = std_log.get("request_headers", "")
+            if rh:
+                hd = orjson.loads(rh) if isinstance(rh, str) else rh
+                env = {}
+                for k, v in hd.items():
+                    env[f"HTTP_{k.upper().replace('-', '_')}"] = v or ""
+                h = evaluate_header_policy(env, method=method)
+                if h:
+                    return f"HeaderBlock:{h[:30]}"
+
+            # UUID 篡改
+            for seg in uri_path.strip("/").split("/"):
+                if len(seg) == 36 and seg.count('-') >= 4 and is_malformed_uuid(seg):
+                    return "UUIDTamper:malformed_uuid"
+
+            # 关键词检测
+            def ctx(seg, _p=uri_path, _s=status_code):
+                return is_malicious_context(_p, seg, str(_s), STATIC_KW)
+
+            kw = evaluate_keyword_policy(
+                path=uri_path, query_keys=std_log.get("query_keys", []),
+                path_exists=pm.path_exists(uri_path),
+                keyword_learning_enabled=True, static_keywords=STATIC_KW,
+                dynamic_keywords=[], legitimate_keywords=DEFAULT_LEGITIMATE_KEYWORDS,
+                exempt_keywords=set(), safe_prefixes=(),
+                malicious_keywords=set(STATIC_KW), is_malicious_context=ctx)
+            if kw.block_reason:
+                return f"KeywordBlock:{kw.block_reason[:30]}"
+
+            # 方法验证
+            m = evaluate_method_policy(method=method, path=uri_path)
+            if m.action == "block":
+                return f"MethodBlock:{m.reason[:30]}"
+
+            return None
+        except Exception:
+            return None
+
+    # 正常流量
+    if mode in ("normal", "all"):
+        print("[1/2] 正常流量测试（验证不误杀）...")
+        msgs = gen_normal_traffic()
+        alerts = sum(1 for m in msgs if process_message(m) is not None)
+        result = AttackResult(name="normal_traffic", messages_sent=len(msgs), alerts_received=alerts)
+        results.append(result)
+        fpr = (alerts / len(msgs) * 100) if msgs else 0
+        print(f"  发送: {len(msgs)}, 告警: {alerts}, 误报率: {fpr:.1f}%\n")
+
+    # 攻击流量
+    if mode in ("attacks", "all"):
+        print("[2/2] 攻击流量测试（验证检测率）...")
+        for name, gen_fn in ATTACK_SUITE:
+            msgs = gen_fn()
+            alerts = sum(1 for m in msgs if process_message(m) is not None)
+            dr = (alerts / len(msgs) * 100) if msgs else 0
+            print(f"  {name:30s} 发送: {len(msgs):3d}, 告警: {alerts:3d}, 检测率: {dr:5.1f}%")
+            results.append(AttackResult(name=name, messages_sent=len(msgs), alerts_received=alerts))
+        print()
+
+    # 汇总
+    print(f"{'=' * 70}")
+    print(f"  汇总")
+    print(f"{'=' * 70}")
+    total_sent = sum(r.messages_sent for r in results if r.name != "normal_traffic")
+    total_alerts = sum(r.alerts_received for r in results if r.name != "normal_traffic")
+    normal_sent = sum(r.messages_sent for r in results if r.name == "normal_traffic")
+    normal_alerts = sum(r.alerts_received for r in results if r.name == "normal_traffic")
+
+    print(f"  攻击检测率:   {total_alerts}/{total_sent} = {(total_alerts/max(total_sent,1)*100):.1f}%")
+    print(f"  正常误报率:   {normal_alerts}/{normal_sent} = {(normal_alerts/max(normal_sent,1)*100):.1f}%")
+    print(f"  Path Manifest: {len(pm.get_all_templates())} 个模板")
+    print()
+
+    # 保存结果
+    report = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "mode": "local",
+        "results": [
+            {"name": r.name, "sent": r.messages_sent, "alerts": r.alerts_received}
+            for r in results
+        ],
+        "summary": {
+            "attack_detection_rate": f"{total_alerts}/{total_sent} ({total_alerts/max(total_sent,1)*100:.1f}%)",
+            "normal_false_positive_rate": f"{normal_alerts}/{normal_sent} ({normal_alerts/max(normal_sent,1)*100:.1f}%)",
+        },
+    }
+
+    output_file = Path(f"sandbox_results_local_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
+    output_file.write_text(json.dumps(report, indent=2, ensure_ascii=False))
+    print(f"  结果已保存: {output_file}")
 
 
 if __name__ == "__main__":
