@@ -144,6 +144,15 @@ class Settings:
     uuid_success_decay: int = 2                  # 成功衰减
     uuid_window_seconds: int = 60                # 评分窗口（秒）
 
+    # 检测模式全局开关（默认全开，设为 false 可单独关闭）
+    detection_header_enabled: bool = True        # 请求头验证
+    detection_uuid_enabled: bool = True          # UUID 篡改检测
+    detection_geo_enabled: bool = True           # 地理围栏
+    detection_rate_limit_enabled: bool = True    # 速率限制
+    detection_keyword_enabled: bool = True       # 关键词策略检测
+    detection_fail_secure_enabled: bool = True   # Fail-Secure 降级
+    detection_method_enabled: bool = True        # HTTP 方法验证
+
     @classmethod
     def from_yaml(cls, path: str) -> "Settings":
         """从 YAML 配置文件加载"""
@@ -243,6 +252,13 @@ class Settings:
             "uuid_not_found_weight":       "UUID_NOT_FOUND_WEIGHT",
             "uuid_success_decay":          "UUID_SUCCESS_DECAY",
             "uuid_window_seconds":         "UUID_WINDOW_SECONDS",
+            "detection_header_enabled":    "DETECTION_HEADER_ENABLED",
+            "detection_uuid_enabled":      "DETECTION_UUID_ENABLED",
+            "detection_geo_enabled":       "DETECTION_GEO_ENABLED",
+            "detection_rate_limit_enabled": "DETECTION_RATE_LIMIT_ENABLED",
+            "detection_keyword_enabled":  "DETECTION_KEYWORD_ENABLED",
+            "detection_fail_secure_enabled": "DETECTION_FAIL_SECURE_ENABLED",
+            "detection_method_enabled":   "DETECTION_METHOD_ENABLED",
         }
 
         int_fields = {
@@ -276,6 +292,13 @@ class Settings:
             "kafka_enable_idempotence",
             "auto_block_enabled",
             "auto_learn_keywords",
+            "detection_header_enabled",
+            "detection_uuid_enabled",
+            "detection_geo_enabled",
+            "detection_rate_limit_enabled",
+            "detection_keyword_enabled",
+            "detection_fail_secure_enabled",
+            "detection_method_enabled",
         }
 
         for attr, env_key in env_map.items():
