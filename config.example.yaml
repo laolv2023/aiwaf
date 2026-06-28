@@ -37,3 +37,40 @@ fail_secure_local_limit: 50          # Redis 不可用时的本地降级阈值
 geoip_db_path: ""                    # MaxMind GeoIP2 DB 路径（空=禁用）
 geo_block_countries: ""              # 阻止的国家（逗号分隔，如 "CN,RU,KP"）
 geo_allow_countries: ""              # 允许的国家（逗号分隔，空=全部允许）
+
+# ── Kafka Producer ──
+kafka_enable_idempotence: true       # 幂等生产者
+kafka_acks: "all"                    # 确认级别（all/1/0）
+
+# ── Kafka Consumer ──
+kafka_auto_offset_reset: "earliest"  # 无偏移时从最早开始
+kafka_max_poll_records: 500          # 单次拉取最大记录数
+
+# ── 进程池 ──
+max_tasks_per_child: 200             # 子进程最大任务数（防内存泄漏）
+
+# ── 微批处理 ──
+batch_max_size: 50                   # 每批最大消息数
+batch_timeout_ms: 10                 # 批处理超时（毫秒）
+batch_queue_maxsize: 10000           # 批处理队列最大长度
+
+# ── 关键词刷新 ──
+keyword_refresh_interval: 10         # 关键词缓存刷新间隔（秒）
+keyword_top_n: 500                   # 从 Redis 获取的 Top N 关键词数
+
+# ── Redis TTL ──
+dedup_ttl: 86400                     # 去重记录 TTL（秒，默认 24 小时）
+blacklist_ttl: 3600                  # IP 黑名单 TTL（秒，默认 1 小时）
+local_blacklist_ttl: 300             # 本地黑名单 TTL（秒，默认 5 分钟）
+local_rate_limit_ttl: 60             # 本地速率限制 TTL（秒）
+
+# ── 熔断器 ──
+circuit_breaker_fail_max: 5          # 连续失败多少次跳闸
+circuit_breaker_timeout: 60          # 熔断器恢复探测间隔（秒）
+
+# ── Fail-Secure 缓冲 ──
+max_pending_ips: 10000               # 待同步 IP 缓冲最大长度
+
+# ── Body 截断 ──
+max_body_hash_bytes: 10485760        # Body 哈希截断阈值（字节，默认 10MB）
+max_body_store_bytes: 1024           # Body 存储截断阈值（字节，默认 1KB）
