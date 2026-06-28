@@ -164,3 +164,27 @@ class RedisStateFacade:
             return
         async with redis_breaker.context():
             await self.mgr.batch_add_keywords(kws)
+
+    async def add_exempt_path(self, path: str):
+        """添加运行时豁免路径"""
+        try:
+            async with redis_breaker.context():
+                await self.mgr.redis.sadd("aiwaf:exempt:paths", path)
+        except Exception:
+            pass
+
+    async def remove_exempt_path(self, path: str):
+        """移除运行时豁免路径"""
+        try:
+            async with redis_breaker.context():
+                await self.mgr.redis.srem("aiwaf:exempt:paths", path)
+        except Exception:
+            pass
+
+    async def get_exempt_paths(self) -> list:
+        """获取所有运行时豁免路径"""
+        try:
+            async with redis_breaker.context():
+                return await self.mgr.redis.smembers("aiwaf:exempt:paths")
+        except Exception:
+            return []
