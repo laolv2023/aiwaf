@@ -133,7 +133,7 @@ def test_body_over_10mb_truncated(self):
 ### 3.1 全量运行
 
 ```bash
-# 运行所有 500 个测试
+# 运行所有 427 个测试
 python -m pytest tests/ -v
 
 # 并行运行（加速）
