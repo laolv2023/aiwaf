@@ -5,8 +5,21 @@ import hashlib
 import orjson
 from typing import Dict, Any
 
+# 默认值（可通过 init_body_limits 覆盖）
 MAX_BODY_HASH_BYTES = 10 * 1024 * 1024  # 10MB 防御性截断阈值 (适应文件上传)
 MAX_BODY_STORE_BYTES = 1024             # 1KB 存储截断阈值
+
+
+def init_body_limits(max_hash_bytes: int = None, max_store_bytes: int = None):
+    """
+    根据 Settings 配置 Body 截断阈值。
+    应在 engine.__init__ 中调用。
+    """
+    global MAX_BODY_HASH_BYTES, MAX_BODY_STORE_BYTES
+    if max_hash_bytes is not None:
+        MAX_BODY_HASH_BYTES = max_hash_bytes
+    if max_store_bytes is not None:
+        MAX_BODY_STORE_BYTES = max_store_bytes
 
 
 def generate_deterministic_trace_id(std_log: dict) -> str:
