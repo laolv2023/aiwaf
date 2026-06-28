@@ -14,12 +14,12 @@ import pytest
 import asyncio
 import orjson
 import collections
-import asyncbreaker
+from aiwaf.stream import asyncbreaker
 from dataclasses import dataclass
 
-from preprocessor import transform_raw_log
-from acl_bootstrap import run_core_logic_batch_isolated, ItemSuccessResult, ItemErrorResult, _collector
-from redis_facade import (
+from aiwaf.stream.preprocessor import transform_raw_log
+from aiwaf.stream.acl_bootstrap import run_core_logic_batch_isolated, ItemSuccessResult, ItemErrorResult, _collector
+from aiwaf.stream.redis_facade import (
     RedisClusterStateManager, RedisStateFacade,
     local_blacklist, local_rate_limit,
     _current_buffer, _backup_buffer, background_sync_worker,
@@ -180,8 +180,8 @@ def engine():
     """创建 engine 实例，mock 外部服务"""
     with patch('concurrent.futures.ProcessPoolExecutor', MagicMock()):
         with patch('aiokafka.AIOKafkaProducer', MagicMock()):
-            with patch('acl_bootstrap.init_worker'):
-                from engine import AIWAFStreamEngine
+            with patch('aiwaf.stream.acl_bootstrap.init_worker'):
+                from aiwaf.stream.engine import AIWAFStreamEngine
                 mgr = MagicMock()
                 mgr.redis = MockRedis()
                 mgr.is_duplicate_and_add = AsyncMock(return_value=False)
@@ -335,8 +335,8 @@ class TestEngineToACLBatch:
         """engine fixture，但使用 REAL run_core_logic_batch_isolated"""
         with patch('concurrent.futures.ProcessPoolExecutor', MagicMock()):
             with patch('aiokafka.AIOKafkaProducer', MagicMock()):
-                with patch('acl_bootstrap.init_worker'):
-                    from engine import AIWAFStreamEngine
+                with patch('aiwaf.stream.acl_bootstrap.init_worker'):
+                    from aiwaf.stream.engine import AIWAFStreamEngine
                     mgr = MagicMock()
                     mgr.redis = MockRedis()
                     mgr.is_duplicate_and_add = AsyncMock(return_value=False)
@@ -504,7 +504,7 @@ class TestEngineToACLBatch:
     @pytest.mark.asyncio
     async def test_item_error_result_triggers_dlq(self, engine):
         """ItemErrorResult 触发 DLQ"""
-        from acl_bootstrap import ItemErrorResult
+        from aiwaf.stream.acl_bootstrap import ItemErrorResult
         engine.facade = MagicMock()
         engine.facade.is_duplicate_and_add = AsyncMock(return_value=False)
         engine.facade.get_and_update_rate_limit = AsyncMock(return_value=[1.0])
@@ -521,7 +521,7 @@ class TestEngineToACLBatch:
     @pytest.mark.asyncio
     async def test_item_error_flushes_blocked_ips(self, engine):
         """ItemErrorResult 中的 blocked_ips 被刷出"""
-        from acl_bootstrap import ItemErrorResult
+        from aiwaf.stream.acl_bootstrap import ItemErrorResult
         engine.facade = MagicMock()
         engine.facade.is_duplicate_and_add = AsyncMock(return_value=False)
         engine.facade.get_and_update_rate_limit = AsyncMock(return_value=[1.0])
@@ -539,7 +539,7 @@ class TestEngineToACLBatch:
     @pytest.mark.asyncio
     async def test_success_result_emits_rate_limit_alert(self, engine):
         """限流触发 alert"""
-        from acl_bootstrap import ItemSuccessResult
+        from aiwaf.stream.acl_bootstrap import ItemSuccessResult
         class FR:
             action = FLOOD_BLOCK
         class FK:
@@ -1089,8 +1089,8 @@ class TestFullPipelineE2E:
         """引擎 fixture 用于 e2e 测试"""
         with patch('concurrent.futures.ProcessPoolExecutor', MagicMock()):
             with patch('aiokafka.AIOKafkaProducer', MagicMock()):
-                with patch('acl_bootstrap.init_worker'):
-                    from engine import AIWAFStreamEngine
+                with patch('aiwaf.stream.acl_bootstrap.init_worker'):
+                    from aiwaf.stream.engine import AIWAFStreamEngine
                     mgr = MagicMock()
                     mgr.redis = MockRedis()
                     mgr.is_duplicate_and_add = AsyncMock(return_value=False)
@@ -1113,7 +1113,7 @@ class TestFullPipelineE2E:
         eng.facade.is_duplicate_and_add = AsyncMock(return_value=False)
         eng.facade.get_and_update_rate_limit = AsyncMock(return_value=[1.0])
         eng.batch_queue = asyncio.Queue()
-        from acl_bootstrap import ItemSuccessResult
+        from aiwaf.stream.acl_bootstrap import ItemSuccessResult
         class FR:
             action = "pass"
         class FK:
@@ -1169,7 +1169,7 @@ class TestFullPipelineE2E:
         eng.facade.is_duplicate_and_add = AsyncMock(return_value=False)
         eng.facade.get_and_update_rate_limit = AsyncMock(return_value=[1.0])
         eng.batch_queue = asyncio.Queue()
-        from acl_bootstrap import ItemSuccessResult
+        from aiwaf.stream.acl_bootstrap import ItemSuccessResult
         class FR:
             action = FLOOD_BLOCK
         class FK:
@@ -1193,7 +1193,7 @@ class TestFullPipelineE2E:
         eng.facade.is_duplicate_and_add = AsyncMock(return_value=False)
         eng.facade.get_and_update_rate_limit = AsyncMock(return_value=[1.0])
         eng.batch_queue = asyncio.Queue()
-        from acl_bootstrap import ItemSuccessResult
+        from aiwaf.stream.acl_bootstrap import ItemSuccessResult
         class FR:
             action = "pass"
         class FK:
@@ -1227,7 +1227,7 @@ class TestFullPipelineE2E:
         eng.facade.is_duplicate_and_add = AsyncMock(return_value=False)
         eng.facade.get_and_update_rate_limit = AsyncMock(return_value=[1.0])
         eng.batch_queue = asyncio.Queue()
-        from acl_bootstrap import ItemSuccessResult
+        from aiwaf.stream.acl_bootstrap import ItemSuccessResult
         class FR:
             action = "pass"
         class FK:
@@ -1286,7 +1286,7 @@ class TestFullPipelineE2E:
         eng.facade.is_duplicate_and_add = AsyncMock(return_value=False)
         eng.facade.get_and_update_rate_limit = AsyncMock(return_value=[1.0])
         eng.batch_queue = asyncio.Queue()
-        from acl_bootstrap import ItemSuccessResult
+        from aiwaf.stream.acl_bootstrap import ItemSuccessResult
         class FR:
             action = "pass"
         class FK:
@@ -1352,7 +1352,7 @@ class TestFullPipelineE2E:
         eng.facade.is_duplicate_and_add = AsyncMock(return_value=False)
         eng.facade.get_and_update_rate_limit = AsyncMock(return_value=[1.0])
         eng.batch_queue = asyncio.Queue()
-        from acl_bootstrap import ItemSuccessResult
+        from aiwaf.stream.acl_bootstrap import ItemSuccessResult
         class FR:
             action = "pass"
         class FK:
