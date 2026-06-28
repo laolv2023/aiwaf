@@ -113,6 +113,9 @@ class Settings:
     # Redis 同步
     background_sync_interval: int = 5          # 后台同步 Worker 间隔（秒）
 
+    # Kafka 消费
+    kafka_retry_interval: int = 5              # 消费循环异常后重试间隔（秒）
+
     @classmethod
     def from_yaml(cls, path: str) -> "Settings":
         """从 YAML 配置文件加载"""
@@ -194,6 +197,7 @@ class Settings:
             "honeypot_ttl":                "HONEYPOT_TTL",
             "keyword_min_segment_length":  "KEYWORD_MIN_SEGMENT_LENGTH",
             "background_sync_interval":    "BACKGROUND_SYNC_INTERVAL",
+            "kafka_retry_interval":        "KAFKA_RETRY_INTERVAL",
         }
 
         int_fields = {
@@ -210,6 +214,7 @@ class Settings:
             "ai_min_logs", "ai_n_estimators",
             "honeypot_ttl", "keyword_min_segment_length",
             "background_sync_interval",
+            "kafka_retry_interval",
         }
 
         float_fields = {
