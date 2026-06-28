@@ -136,6 +136,16 @@ post_only_suffixes_extra: ""
 # 追加到 LOGIN_PATH_PREFIXES（登录路径前缀）
 login_paths_extra: ""
 
+# 预定义特征替换模式（false=追加到默认值，true=仅使用自定义值替换默认值）
+# 注意：替换模式下请确保包含所有需要的模式，否则可能漏检
+static_keywords_replace_mode: false
+legitimate_keywords_replace_mode: false
+inherently_malicious_replace_mode: false
+very_strong_attacks_replace_mode: false
+probe_path_patterns_replace_mode: false
+post_only_suffixes_replace_mode: false
+login_paths_replace_mode: false
+
 # ── 请求头参数（补充）──
 header_max_bytes: 32768                      # Header 最大字节数
 header_max_count: 100                        # Header 最大数量
