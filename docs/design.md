@@ -1,222 +1,224 @@
 # AIWAF-Stream 设计文档
 
-> 版本: 1.0 | 最后更新: 2026-06-05
+> 版本: 2.0 | 最后更新: 2026-06-28
 
 ---
 
 ## 1. 项目概述
 
-AIWAF-Stream 是一个**异步流式 Web 应用防火墙引擎**，面向高吞吐场景（>10K QPS），核心特性包括：
+AIWAF-Stream 是一个**异步流式 Web 应用防火墙引擎**，从 Kafka 消费 Akto API 流量数据，经 16 项检测能力处理后输出告警。
 
-- **零信任指纹**：基于完整请求 Body 的确定性 trace_id，实现端到端可追溯
-- **进程池隔离**：核心安全逻辑在 `ProcessPoolExecutor` 子进程中执行，主进程异步非阻塞
-- **异步熔断 + Fail-Secure 本地防线**：Redis 不可用时自动降级到本地 TTL 缓存
-- **双缓冲写回**：Fail-Secure 阻断的 IP 通过双缓冲机制异步同步回 Redis
-- **微批调度**：自适应批量聚合，单批最多 50 条，兼顾吞吐与延迟
+核心特性：
+
+- **Kafka 流式消费**：从 `akto.api.logs` Topic 消费 Akto 流量 JSON
+- **16 项检测能力**：关键词 + 速率限制 + AI 异常检测 + 请求头验证 + UUID 篡改 + 地理围栏 + 蜜罐 + 路径清单 + Fail-Secure 降级 + 熔断器 + 双缓冲写回 + 子进程隔离 + 关键词自学习
+- **48 项可配置**：YAML + 环境变量 + Redis 运行时覆盖（25 项可覆盖）
+- **427 测试用例**：100% 通过率
 
 ---
 
-## 2. 架构总览
+## 2. 目录结构
 
 ```
-                          ┌─────────────────────────────────────┐
-                          │          Kafka (Input Topic)          │
-                          └──────────────┬──────────────────────┘
-                                         │ raw_log
-                                         ▼
-┌────────────────────────────────────────────────────────────────────┐
-│                        AIWAFStreamEngine (主进程 asyncio)           │
-│                                                                    │
-│  ┌──────────────┐   ┌──────────────┐   ┌──────────────────────┐   │
-│  │  preprocessor │──▶│  process_log │──▶│  _batch_dispatcher   │   │
-│  │  trace_id     │   │  dedup+RL    │   │  (微批调度器)         │   │
-│  │  transform    │   │  fail-secure │   │                      │   │
-│  └──────────────┘   └──────┬───────┘   └──────────┬───────────┘   │
-│                            │                       │               │
-│              ┌─────────────┼───────────────────────┼──────┐        │
-│              │  RedisStateFacade │ background_sync │  KW   │        │
-│              │  (CircuitBreaker) │    _worker      │refresh│        │
-│              └─────────┬─────────┴────────┬────────┴───────┘        │
-│                        │                  │                         │
-│              ┌─────────▼─────────┐  ┌─────▼──────────┐             │
-│              │ local_blacklist   │  │ double_buffer   │             │
-│              │ local_rate_limit  │  │ (deque A ⇄ B)   │             │
-│              │ (TTLCache)        │  │                 │             │
-│              └───────────────────┘  └─────────────────┘             │
-└────────────────────────────────────────────────────────────────────┘
-          │                                              │
-          │ ProcessPoolExecutor                          │ Kafka
-          ▼                                              ▼
-┌──────────────────────┐              ┌──────────────────────────────┐
-│  子进程 (isolated)    │              │   Alert Topic / DLQ Topic     │
-│                      │              └──────────────────────────────┘
-│  run_core_logic_     │
-│  batch_isolated()    │
-│  ├─ evaluate_rate    │
-│  ├─ evaluate_keyword │
-│  └─ ProcessLocal     │
-│     Collector        │
-└──────────────────────┘
+aiwaf/
+  core/               ← 检测策略库（22 模块，纯逻辑，可复用）
+    ip_keyword.py        关键词策略 + 自学习
+    malicious_context.py 恶意上下文判定（6 指标）
+    path_manifest.py      路径清单（从流量自动构建）
+    header_validation.py  请求头验证
+    anomaly.py            AI 异常检测（IsolationForest）
+    stream_trainer.py     批量训练器
+    rate_limit.py         速率限制判定
+    uuid_tamper.py        UUID 篡改检测
+    honeypot.py           蜜罐时序检测
+    method_validation.py  HTTP 方法验证
+    geo_policy.py         地理围栏策略
+    geoip.py              GeoIP 查询
+    exemptions.py         路径豁免
+    ...
+  stream/              ← 流式运行时框架（8 模块）
+    engine.py            主引擎：Kafka 消费 + 检测编排
+    redis_facade.py      Redis 状态管理 + Fail-Secure 降级
+    acl_bootstrap.py     子进程隔离层
+    akto_adapter.py      Akto JSON 适配层
+    preprocessor.py      预处理：trace_id + query + body 截断
+    config.py            配置加载（YAML + 环境变量）
+    config_override.py   Redis 运行时配置覆盖
+    asyncbreaker.py      熔断器封装
+scripts/
+  verify_akto_logs.py   ← 端到端验证脚本
+tests/                  ← 427 测试用例
+docs/                   ← 文档
 ```
 
 ---
 
-## 3. 数据流
-
-### 3.1 请求处理生命周期
+## 3. 架构总览
 
 ```
-Raw Log → [preprocessor] → Std Log (with trace_id)
-  → [process_log] 
-      ├─ SETNX 去重 (Redis, 24h TTL)
-      ├─ 滑动窗口限流 (Redis ZSET)
-      ├─ [CircuitBreaker 触发]
-      │    └→ Fail-Secure 本地防线
-      │         ├─ local_blacklist 检查
-      │         ├─ local_rate_limit 计数 → >50 → blacklist + backup_buffer
-      │         └─ bypass → 放行
-      └─ [正常路径]
-           └→ batch_queue → _batch_dispatcher → ProcessPool
-                ├─ evaluate_rate_limit (AIWAF core)
-                ├─ evaluate_keyword_policy (AIWAF core)
-                └→ 结果处理
-                     ├─ flood_block → _emit_alert
-                     ├─ keyword_block → _emit_alert
-                     ├─ side_effects.blocked_ips → batch_block_ips (Redis)
-                     └─ side_effects.keywords → batch_add_keywords (Redis)
+Kafka: akto.api.logs (JSON)
+  │
+  ├─ akto_adapter.parse_akto_json_message()
+  │    JSON → raw_log dict (7 核心 + 8 扩展字段)
+  │
+  ├─ preprocessor.transform_raw_log()
+  │    生成 trace_id + 拆分 query + 截断 body + 透传扩展字段
+  │
+  ├─ engine.process_log()
+  │    ├── PathManifest.record()
+  │    ├── 请求头验证 (evaluate_header_policy)
+  │    ├── 路径豁免检查
+  │    ├── UUID 篡改检测
+  │    ├── 地理围栏 (GeoIP)
+  │    ├── Redis 去重 (SETNX)
+  │    ├── Redis 速率限制 (ZSET)
+  │    └── → 微批处理 → ProcessPoolExecutor
+  │         ├── 速率限制判定 (evaluate_rate_limit)
+  │         ├── 关键词策略 (evaluate_keyword_policy)
+  │         │   ├── 探测路径检测 (PROBE_PATH_PATTERNS)
+  │         │   ├── 学习关键词匹配 (dynamic_keywords)
+  │         │   └── 固有恶意模式 (INHERENTLY_MALICIOUS_PATTERNS)
+  │         └── 关键词自学习 (is_malicious_context)
+  │
+  ├─ Fail-Secure 降级（Redis 不可用时）
+  │    ├── 本地黑名单检查
+  │    ├── 本地速率限制计数
+  │    └── 双缓冲写回
+  │
+  └─ Kafka: akto.aiwaf.alerts (JSON, 14 字段)
+      Kafka: akto.aiwaf.dlq (异常死信)
 ```
 
-### 3.2 trace_id 生成算法
+---
+
+## 4. 数据流
+
+### 4.1 请求处理生命周期
+
+```
+Kafka 消息 → akto_adapter → preprocessor → process_log
+  │
+  ├── 1. PathManifest.record(uri_path, method, status_code)
+  ├── 2. 请求头验证 → 命中? → HeaderBlock 告警 + return
+  ├── 3. 路径豁免检查 → 命中? → return（跳过所有检测）
+  ├── 4. UUID 篡改检测 → 命中? → UUIDTamper 告警
+  ├── 5. 地理围栏 → 命中? → GeoBlock 告警 + return
+  ├── 6. Redis 去重 (SETNX, 24h TTL) → 重复? → return
+  ├── 7. Redis 速率限制 (ZSET 滑动窗口)
+  │      ├── Redis 不可用 (CircuitBreaker) → Fail-Secure 降级
+  │      │   ├── 本地黑名单检查 → 命中? → Local_Blacklist_Block 告警
+  │      │   └── 本地速率计数 > limit → Local_RateLimit_Block 告警
+  │      └── Redis 正常 → 继续检测
+  └── 8. batch_queue → _batch_dispatcher → ProcessPoolExecutor
+       ├── evaluate_rate_limit → FLOOD_BLOCK? → RateLimitFlood 告警
+       ├── evaluate_keyword_policy
+       │   ├── PROBE_PATH_PATTERNS 匹配 → KeywordBlock 告警
+       │   ├── dynamic_keywords 匹配 → KeywordBlock 告警
+       │   └── INHERENTLY_MALICIOUS_PATTERNS → KeywordBlock 告警
+       ├── is_malicious_context → learned_keywords → Redis 写入
+       └── side_effects → batch_block_ips + batch_add_keywords
+```
+
+### 4.2 trace_id 生成算法
 
 ```
 trace_id = SHA256( client_ip | uri_path | MD5(request_body_bytes) | timestamp )[:32]
 
 截断策略:
-- request_body ≥ 10MB → 截断前 10MB 后 MD5 (防 OOM)
-- request_body 存储 → 截断前 1KB (仅 DLQ/存储用，不影响指纹)
+- request_body ≥ max_body_hash_bytes (默认 10MB) → 截断后 MD5
+- request_body 存储 → 截断前 max_body_store_bytes (默认 1KB)
 - dict/list 类型 body → orjson.dumps() 序列化后 hash
-- bytes 类型 body → 直接 hash
 ```
 
-### 3.3 双缓冲写回机制
+### 4.3 双缓冲写回机制
 
 ```
-_insert → _backup_buffer.append(ip)
+Fail-Secure 拉黑 IP → _backup_buffer.append(ip)
                               │
-background_sync_worker (每 5s):
+background_sync_worker (每 background_sync_interval 秒, 默认 5s):
   _current_buffer ⇄ _backup_buffer  (原子交换)
-  for ip in _current_buffer:
-      batch_block_ips(ip, "Local_FailSecure")  → Redis
-      _current_buffer.popleft()
+  ips_to_sync = list(_backup_buffer)
+  batch_block_ips(ips_to_sync) → Redis
+  同步成功 → _backup_buffer.clear()
+  同步失败 → 数据保留在 _backup_buffer，下次重试
   
-溢出保护: len(_current_buffer) ≥ 10000 → METRIC_PENDING_OVERFLOW++
+溢出保护: len(_backup_buffer) ≥ max_pending_ips (默认 10000) → METRIC_PENDING_OVERFLOW++
 ```
 
 ---
 
-## 4. 模块设计
+## 5. 告警输出
 
-### 4.1 `preprocessor.py` — 预处理引擎
+### 5.1 告警 Topic (`akto.aiwaf.alerts`)
 
-| 函数 | 职责 | 输入 | 输出 |
-|------|------|------|------|
-| `generate_deterministic_trace_id()` | 零信任流式指纹 | `std_log: dict` | `str` (32-char hex) |
-| `transform_raw_log()` | 原始日志标准化 | `raw_log: dict` | `std_log: dict` |
+14 字段 JSON：
 
-**设计要点**：
-- 非字符串 body 自动序列化为 JSON（防 `hashlib.update()` 崩溃）
-- Query 参数展开为 `key=value` 字符串列表，保留 HTTP 语义
-- `client_ip` 优先用 `client_ip`，回退到 `remote_addr`
+```json
+{
+  "trace_id": "a1b2c3d4...",
+  "rule_id": "KeywordBlock:Keyword block: Inherently suspicious: probe path",
+  "alert_timestamp": 1719500000.0,
+  "client_ip": "10.0.1.5",
+  "akto_account_id": "1000000",
+  "akto_vxlan_id": "1",
+  "source": "MIRRORING",
+  "direction": "REQUEST",
+  "method": "GET",
+  "uri_path": "/.env",
+  "status_code": 404,
+  "detected_at": 1719500005.123,
+  "severity": "HIGH",
+  "req_body_truncated": ""
+}
+```
 
-### 4.2 `acl_bootstrap.py` — 运行时防腐层 (ACL)
+### 5.2 死信 Topic (`akto.aiwaf.dlq`)
 
-| 组件 | 类型 | 职责 |
-|------|------|------|
-| `ProcessLocalCollector` | class | 子进程内存收集器，替代 Redis/CSV 写操作 |
-| `run_core_logic_batch_isolated()` | function | 批量执行入口，逐条容错 |
-| `init_worker()` | function | ProcessPool initializer，加载 ML 模型 |
-| `ItemSuccessResult` | dataclass | 成功结果包装 |
-| `ItemErrorResult` | dataclass | 失败结果包装（100% 可序列化） |
-
-**设计要点**：
-- `ProcessLocalCollector.extract_and_clear()` 原子提取+清空，防止跨请求污染
-- 子进程异常不传播到主进程，包装为 `ItemErrorResult`
-- 每条消息独立容错，不因单条失败丢弃整批
-
-### 4.3 `redis_facade.py` — Redis 状态管理
-
-| 组件 | 类型 | 职责 |
-|------|------|------|
-| `RedisClusterStateManager` | class | 核心 Redis 操作（SETNX/ZSET/Pipeline） |
-| `RedisStateFacade` | class | 熔断器装饰门面 |
-| `local_blacklist` | TTLCache(10000, 300s) | 本地黑名单 |
-| `local_rate_limit` | TTLCache(10000, 60s) | 本地限流计数器 |
-| `background_sync_worker()` | coroutine | 双缓冲异步写回 |
-
-**Redis 数据结构**：
-| Key Pattern | 类型 | TTL | 用途 |
-|-------------|------|-----|------|
-| `aiwaf:idem:{trace_id}` | String (SETNX) | 86400s | 请求去重 |
-| `aiwaf:rl:{ip}` | ZSET | `window*2` | 滑动窗口限流 |
-| `aiwaf:blk:{ip}` | String | 3600s | IP 黑名单 |
-| `aiwaf:keywords` | ZSET | 持久 | 动态关键词排行 |
-
-### 4.4 `engine.py` — 异步流式检测引擎
-
-| 组件 | 类型 | 职责 |
-|------|------|------|
-| `AIWAFStreamEngine` | class | 主引擎，编排全链路 |
-| `_batch_dispatcher()` | coroutine | 自适应微批调度器 |
-| `_keyword_refresh_worker()` | coroutine | 10s 间隔刷新关键词缓存 |
-| `_emit_alert()` | coroutine | Kafka 告警发送 |
-| `_route_to_dlq()` | coroutine | DLQ 路由 |
-
-**关键参数**：
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `core_process_pool_size` | settings 配置 | 子进程池大小 |
-| `max_tasks_per_child` | 200 | 每个子进程最大任务数（防内存泄漏） |
-| `batch_queue.maxsize` | 10000 | 批队列容量（背压） |
-| `batch_size` | 50 | 单批最大条数 |
-| `batch_timeout` | 0.01s | 微批等待超时 |
-
-### 4.5 `train_pipeline.py` — 离线训练管道
-
-| 函数 | 职责 |
-|------|------|
-| `_process_row_purifier()` | 行级清洗：评估关键词策略，返回是否保留该行 |
-
-### 4.6 `asyncbreaker.py` — 异步熔断器
-
-| 类 | 职责 |
-|------|------|
-| `CircuitBreakerError` | 熔断器打开时抛出的异常 |
-| `CircuitBreaker` | 异步熔断器，提供 `context()` async context manager |
+```json
+{
+  "trace_id": "...",
+  "error": "Processing failed: ...",
+  "error_type": "ValueError",
+  "raw_log": { ... }
+}
+```
 
 ---
 
-## 5. 容错设计
+## 6. 配置体系
 
-### 5.1 熔断降级路径
+### 三级优先级
 
 ```
-Redis 操作
-  ├─ 正常 → 返回结果
-  └─ CircuitBreakerError
-       └→ Fail-Secure 本地防线
-            ├─ IP in local_blacklist → 阻断 + Alert
-            ├─ IP in double_buffer → 阻断 + Alert
-            ├─ local_rate_limit[ip] > 50 → blacklist + buffer → 阻断
-            └─ local_rate_limit[ip] ≤ 50 → 放行
+环境变量 (最高) > YAML 配置文件 > 内置默认值 (最低)
 ```
 
-### 5.2 ProcessPool 容错
+### Redis 运行时覆盖（25 项检测参数）
 
-- `BrokenProcessPool` → 重建 Executor + `METRIC_POOL_FATAL` 指标
-- `max_tasks_per_child=200` → 定期回收子进程，防内存泄漏
-- `cancel_futures=True` → BrokenPool 时取消所有未完成任务
+```bash
+redis-cli SET aiwaf:config:rate_limit_max_requests 200
+redis-cli SET aiwaf:config:auto_block_enabled false
+redis-cli DEL aiwaf:config:rate_limit_max_requests  # 恢复默认
+```
 
-### 5.3 可观测性
+10 秒本地缓存，Redis 不可用时降级到 YAML/默认值。
+
+详见 `config.example.yaml`（48 项配置）。
+
+---
+
+## 7. 安全设计原则
+
+1. **零信任指纹**：trace_id = SHA256(IP + URI + MD5(Body) + Timestamp)，客户端不可伪造
+2. **SETNX 绝对幂等**：相同 trace_id 的请求只处理一次（`dedup_ttl` 默认 24h）
+3. **Fail-Secure**：Redis 不可用时不丢检测能力，本地缓存 + 熔断器承担防线
+4. **子进程隔离**：核心逻辑 crash 不影响主进程事件循环
+5. **人工审核模式**：`auto_block_enabled=false` 时只告警不拉黑
+6. **白名单机制**：合法关键词白名单防止误封正常流量
+
+---
+
+## 8. 可观测性
 
 | Metric | 类型 | 含义 |
 |--------|------|------|
@@ -227,10 +229,12 @@ Redis 操作
 
 ---
 
-## 6. 安全设计原则
+## 9. 相关文档
 
-1. **零信任指纹**：trace_id 由请求内容决定，客户端不可伪造
-2. **SETNX 绝对幂等**：相同 trace_id 的请求只处理一次（24h 窗口）
-3. **防乱序**：限流 ZSET 使用 `event_time*1000 + random` 作为 score，防止同毫秒覆盖
-4. **Fail-Secure**：Redis 不可用时不丢检测能力，本地缓存承担防线
-5. **子进程隔离**：核心逻辑 crash 不影响主进程事件循环
+- [检测能力详解](detection_capabilities.md)
+- [检测模式实现机制与配置方式](detection_implementation.md)
+- [部署与配置](deployment.md)
+- [使用手册](usage.md)
+- [测试文档](testing.md)
+- [排障指南](troubleshooting.md)
+- [开发文档](development.md)
