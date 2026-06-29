@@ -471,6 +471,7 @@ class AIWAFStreamEngine:
         alert = {
             # 现有字段
             "trace_id": std_log.get("trace_id"),
+            "request_uuid": std_log.get("request_uuid", ""),  # 源端 UUID（可选，用于外部系统关联）
             "rule_id": rule,
             "alert_timestamp": std_log.get("timestamp"),
             "client_ip": std_log.get("client_ip"),
