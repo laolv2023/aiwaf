@@ -97,6 +97,8 @@ ai_min_logs: 50                      # 最小训练样本数（不足则跳过 A
 ai_contamination: 0.05               # IsolationForest 污染率（异常比例）
 ai_n_estimators: 100                 # IsolationForest 树数
 ai_max_samples: "auto"               # IsolationForest 最大样本数
+ai_anomaly_enabled: false           # AI 异常检测实时预测（默认关闭，需先训练模型）
+ai_anomaly_window: 300              # 历史请求窗口（秒，默认 5 分钟）
 
 # ── 蜜罐时序检测 ──
 honeypot_ttl: 300                    # 蜜罐 GET 时间戳 TTL（秒）
