@@ -80,4 +80,5 @@ def parse_akto_json_message(raw_json: str) -> Dict[str, Any]:
         "response_payload": msg.get("responsePayload", ""),
         "request_headers": msg.get("requestHeaders", ""),  # JSON string
         "response_headers": msg.get("responseHeaders", ""),
+        "request_uuid": msg.get("request_uuid", "") or msg.get("requestUuid", ""),  # 源端 UUID（可选）
     }
