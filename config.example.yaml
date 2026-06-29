@@ -164,4 +164,6 @@ detection_geo_enabled: true                  # 地理围栏
 detection_rate_limit_enabled: true           # 速率限制
 detection_keyword_enabled: true              # 关键词策略检测
 detection_fail_secure_enabled: true          # Fail-Secure 降级
-detection_method_enabled: true               # HTTP 方法验证
+detection_method_enabled: true               # HTTP 方法验证（总开关）
+detection_method_post_only: true             # GET→POST-only 端点检测（无误报）
+detection_method_unsupported: false          # 不支持的方法检测（默认关闭，PUT/PATCH/DELETE 可能误报）
