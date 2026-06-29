@@ -237,13 +237,37 @@ class AIWAFStreamEngine:
                 flood_threshold = await self.config_override.get_async("rate_limit_flood_threshold", self.settings.rate_limit_flood_threshold)
                 rl_window = await self.config_override.get_async("rate_limit_window", self.settings.rate_limit_window)
                 rl_max_req = await self.config_override.get_async("rate_limit_max_requests", self.settings.rate_limit_max_requests)
+
+                # AI 异常检测：从 Redis 加载 IP 历史窗口
+                ip_histories = {}
+                if self.settings.ai_anomaly_enabled and redis_available:
+                    unique_ips = set()
+                    for log_bytes in batch_logs:
+                        try:
+                            sl = orjson.loads(log_bytes)
+                            unique_ips.add(sl.get("client_ip", ""))
+                        except Exception:
+                            pass
+                    for ip in unique_ips:
+                        if ip:
+                            ip_histories[ip] = await self.facade.get_ip_history(ip)
+
                 batch_results = await loop.run_in_executor(
                     self.core_executor, run_core_logic_batch_isolated,
                     batch_logs, batch_ts, batch_et, current_kws,
                     (), None, None, (), None,
                     flood_threshold, True, known_paths,
                     rl_window, rl_max_req,
+                    self.settings.ai_anomaly_enabled,
+                    self.settings.ai_anomaly_window,
+                    ip_histories if ip_histories else None,
                 )
+
+                # AI 异常检测：将更新后的 IP 历史写回 Redis
+                if self.settings.ai_anomaly_enabled and redis_available and ip_histories:
+                    for ip, hist in ip_histories.items():
+                        if hist:
+                            await self.facade.set_ip_history(ip, hist, self.settings.ai_anomaly_window)
                 if len(batch_results) != len(batch_futures):
                     min_len = min(len(batch_futures), len(batch_results))
                     for i in range(min_len):
@@ -482,6 +506,11 @@ class AIWAFStreamEngine:
                 await self._emit_alert(std_log, f"KeywordBlock:{result.kw_decision.block_reason}")
             except Exception:
                 pass
+        elif self.settings.ai_anomaly_enabled and result.side_effects.get('ai_anomaly_block'):
+            try:
+                await self._emit_alert(std_log, f"AIAnomaly:{result.side_effects['ai_anomaly_block']}")
+            except Exception:
+                pass
 
     async def _batch_add_keywords(self, kws: list):
         if not kws:
@@ -558,6 +587,8 @@ class AIWAFStreamEngine:
             return "HIGH"
         if "geo" in rule_lower:
             return "MEDIUM"
+        if "aianomaly" in rule_lower or "ai anomaly" in rule_lower:
+            return "HIGH"
         return "LOW"
 
     async def _consume_loop(self):
