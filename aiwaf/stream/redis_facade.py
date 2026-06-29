@@ -165,6 +165,25 @@ class RedisStateFacade:
         async with redis_breaker.context():
             await self.mgr.batch_add_keywords(kws)
 
+    async def get_ip_history(self, ip: str) -> list:
+        """获取 IP 的历史请求窗口（用于 AI 异常检测）"""
+        try:
+            async with redis_breaker.context():
+                data = await self.mgr.redis.get(f"aiwaf:hist:{ip}")
+                if data:
+                    return orjson.loads(data)
+                return []
+        except Exception:
+            return []
+
+    async def set_ip_history(self, ip: str, history: list, ttl: int = 300):
+        """更新 IP 的历史请求窗口"""
+        try:
+            async with redis_breaker.context():
+                await self.mgr.redis.set(f"aiwaf:hist:{ip}", orjson.dumps(history), ex=ttl)
+        except Exception:
+            pass
+
     async def add_exempt_path(self, path: str):
         """添加运行时豁免路径"""
         try:
