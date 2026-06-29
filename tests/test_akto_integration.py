@@ -470,6 +470,8 @@ class MockSettings:
     detection_keyword_enabled: bool = True
     detection_fail_secure_enabled: bool = True
     detection_method_enabled: bool = True
+    detection_method_post_only: bool = True
+    detection_method_unsupported: bool = False
     static_keywords_replace_mode: bool = False
     legitimate_keywords_replace_mode: bool = False
     inherently_malicious_replace_mode: bool = False
