@@ -161,6 +161,8 @@ class Settings:
     detection_keyword_enabled: bool = True       # 关键词策略检测
     detection_fail_secure_enabled: bool = True   # Fail-Secure 降级
     detection_method_enabled: bool = True        # HTTP 方法验证
+    detection_method_post_only: bool = True      # GET→POST-only 端点检测（无误报风险）
+    detection_method_unsupported: bool = False   # 不支持的 HTTP 方法检测（PUT/PATCH/DELETE 可能误报，默认关闭）
 
     @classmethod
     def from_yaml(cls, path: str) -> "Settings":
@@ -275,6 +277,8 @@ class Settings:
             "detection_keyword_enabled":  "DETECTION_KEYWORD_ENABLED",
             "detection_fail_secure_enabled": "DETECTION_FAIL_SECURE_ENABLED",
             "detection_method_enabled":   "DETECTION_METHOD_ENABLED",
+            "detection_method_post_only": "DETECTION_METHOD_POST_ONLY",
+            "detection_method_unsupported": "DETECTION_METHOD_UNSUPPORTED",
         }
 
         int_fields = {
@@ -315,6 +319,8 @@ class Settings:
             "detection_keyword_enabled",
             "detection_fail_secure_enabled",
             "detection_method_enabled",
+            "detection_method_post_only",
+            "detection_method_unsupported",
             "static_keywords_replace_mode",
             "legitimate_keywords_replace_mode",
             "inherently_malicious_replace_mode",
