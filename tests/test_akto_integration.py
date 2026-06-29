@@ -968,8 +968,8 @@ class TestEmitAlert:
         assert sent_data["severity"] == "LOW"
 
     @pytest.mark.asyncio
-    async def test_alert_has_14_fields(self, engine):
-        """告警输出包含全部 14 个字段"""
+    async def test_alert_has_15_fields(self, engine):
+        """告警输出包含全部 15 个字段"""
         std_log = make_std_log()
         std_log["akto_account_id"] = "1"
         std_log["akto_vxlan_id"] = "1"
@@ -978,7 +978,7 @@ class TestEmitAlert:
         await engine._emit_alert(std_log, "Rule")
         sent_data = orjson.loads(engine.producer.send_and_wait.call_args[0][1])
         expected_keys = {
-            "trace_id", "rule_id", "alert_timestamp", "client_ip",
+            "trace_id", "request_uuid", "rule_id", "alert_timestamp", "client_ip",
             "akto_account_id", "akto_vxlan_id", "source", "direction",
             "method", "uri_path", "status_code",
             "detected_at", "severity", "req_body_truncated"
