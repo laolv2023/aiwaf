@@ -27,6 +27,7 @@ from aiwaf.core.uuid_tamper import record_uuid_signal, is_malformed_uuid, collec
 from aiwaf.core.geo_policy import evaluate_geo_policy
 from aiwaf.core.geoip import lookup_country_name, GEOIP_AVAILABLE
 from aiwaf.core.exemptions import should_apply_middleware_for_path
+from aiwaf.core.method_validation import evaluate_method_policy
 from aiwaf.stream.config_override import ConfigOverride
 
 METRIC_ENGINE_IN = Counter('aiwaf_engine_in_total', 'Logs received')
@@ -375,6 +376,29 @@ class AIWAFStreamEngine:
                         return
             except Exception:
                 pass
+
+        # ── HTTP 方法验证 ──
+        if self.settings.detection_method_enabled and should_apply_middleware_for_path(uri_path, self._path_rules, "method_validation"):
+            method = std_log.get("method", "GET")
+            method_u = (method or "").upper()
+            # GET→POST-only 检测（无误报风险，默认开启）
+            # 不支持的方法检测（PUT/PATCH/DELETE 可能误报，默认关闭）
+            check_post_only = self.settings.detection_method_post_only
+            check_unsupported = self.settings.detection_method_unsupported
+            if method_u == "GET" and check_post_only:
+                from aiwaf.core.honeypot import should_block_get_to_post_only_endpoint
+                if should_block_get_to_post_only_endpoint(uri_path, accepts_get=False):
+                    try:
+                        await self._emit_alert(std_log, f"MethodBlock:GET to POST-only endpoint: {uri_path}")
+                    except Exception:
+                        pass
+                    return
+            elif method_u not in ("GET", "POST", "HEAD", "OPTIONS") and check_unsupported:
+                try:
+                    await self._emit_alert(std_log, f"MethodBlock:Unsupported method {method_u} for {uri_path}")
+                except Exception:
+                    pass
+                return
 
         redis_available = True
         try:
