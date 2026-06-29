@@ -127,6 +127,8 @@ class FullMockSettings:
     ai_contamination: float = 0.05
     ai_n_estimators: int = 100
     ai_max_samples: str = "auto"
+    ai_anomaly_enabled: bool = False
+    ai_anomaly_window: int = 300
     honeypot_ttl: int = 300
     keyword_min_segment_length: int = 3
     background_sync_interval: int = 5
@@ -442,7 +444,7 @@ class TestConfigYAML:
         """配置项总数 = 50"""
         from dataclasses import fields
         count = len(fields(Settings))
-        assert count == 81, f"Expected 51 config fields, got {count}"
+        assert count == 83, f"Expected 51 config fields, got {count}"
 
 
 # ============================================================
