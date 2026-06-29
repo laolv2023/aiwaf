@@ -103,6 +103,8 @@ class Settings:
     ai_contamination: float = 0.05             # IsolationForest 污染率（异常比例）
     ai_n_estimators: int = 100                 # IsolationForest 树数
     ai_max_samples: str = "auto"               # IsolationForest 最大样本数
+    ai_anomaly_enabled: bool = False           # AI 异常检测实时预测（默认关闭，需先训练模型）
+    ai_anomaly_window: int = 300               # 历史请求窗口（秒，默认 5 分钟）
 
     # 蜜罐时序检测
     honeypot_ttl: int = 300                    # 蜜罐 GET 时间戳 TTL（秒）
@@ -242,6 +244,8 @@ class Settings:
             "ai_contamination":            "AI_CONTAMINATION",
             "ai_n_estimators":             "AI_N_ESTIMATORS",
             "ai_max_samples":              "AI_MAX_SAMPLES",
+            "ai_anomaly_enabled":          "AI_ANOMALY_ENABLED",
+            "ai_anomaly_window":           "AI_ANOMALY_WINDOW",
             "honeypot_ttl":                "HONEYPOT_TTL",
             "keyword_min_segment_length":  "KEYWORD_MIN_SEGMENT_LENGTH",
             "background_sync_interval":    "BACKGROUND_SYNC_INTERVAL",
@@ -292,7 +296,7 @@ class Settings:
             "circuit_breaker_fail_max", "circuit_breaker_timeout",
             "max_pending_ips", "max_body_hash_bytes", "max_body_store_bytes",
             "header_max_ua_length", "header_max_accept_length",
-            "ai_min_logs", "ai_n_estimators",
+            "ai_min_logs", "ai_n_estimators", "ai_anomaly_window",
             "honeypot_ttl", "keyword_min_segment_length",
             "background_sync_interval",
             "kafka_retry_interval",
@@ -312,6 +316,7 @@ class Settings:
             "kafka_enable_idempotence",
             "auto_block_enabled",
             "auto_learn_keywords",
+            "ai_anomaly_enabled",
             "detection_header_enabled",
             "detection_uuid_enabled",
             "detection_geo_enabled",
