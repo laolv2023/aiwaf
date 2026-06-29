@@ -13,6 +13,7 @@ from aiwaf.core.malicious_context import (
     DEFAULT_LEGITIMATE_KEYWORDS,
 )
 from aiwaf.core.path_manifest import PathManifest, templify_path
+from aiwaf.core.anomaly import evaluate_anomaly
 
 
 @dataclass
@@ -129,6 +130,9 @@ def run_core_logic_batch_isolated(
     known_path_templates: set = None,
     rate_limit_window: int = 60,
     rate_limit_max_requests: int = 100,
+    ai_anomaly_enabled: bool = False,
+    ai_anomaly_window: int = 300,
+    ip_histories: dict = None,
 ) -> List[Any]:
     """子进程批量执行入口，逐条容错"""
     if legitimate_keywords is None:
@@ -189,8 +193,63 @@ def run_core_logic_batch_isolated(
                 is_malicious_context=_ctx_fn,
             )
 
+            # AI 异常检测（实时预测）
+            ai_block_reason = None
+            ai_learned_keywords = []
+            if ai_anomaly_enabled and _local_model is not None and ip_histories is not None:
+                try:
+                    ip = std_log.get("client_ip", "")
+                    history = ip_histories.get(ip, [])
+                    # history 格式: [(timestamp, path, status_code, response_time), ...]
+                    resp_time = 0.05  # Akto 消息中无响应时间，使用默认值
+
+                    def _path_exists_fn(p):
+                        if known_path_templates is not None:
+                            return templify_path(p) in known_path_templates
+                        return False
+
+                    def _is_exempt_fn(p):
+                        return False
+
+                    def _malicious_ctx_fn(seg, _p=uri_path, _s=status_code):
+                        return _real_is_malicious_context(_p, seg, str(_s), STATIC_KW)
+
+                    outcome = evaluate_anomaly(
+                        ip=ip,
+                        path=uri_path,
+                        status_code=status_code,
+                        response_time=resp_time,
+                        now=batch_event_times[i],
+                        history=history,
+                        window_seconds=ai_anomaly_window,
+                        model=_local_model,
+                        static_keywords=STATIC_KW,
+                        malicious_keywords=malicious_keywords,
+                        keyword_learning_enabled=keyword_learning_enabled,
+                        path_exists=_path_exists_fn,
+                        is_exempt_path=_is_exempt_fn,
+                        is_malicious_context=_malicious_ctx_fn,
+                        legitimate_keywords=legitimate_keywords,
+                    )
+
+                    if outcome.block:
+                        ai_block_reason = outcome.reason
+                        if outcome.learned_keywords:
+                            ai_learned_keywords = outcome.learned_keywords
+
+                    # 更新 IP 历史（传回主进程写 Redis）
+                    if ip_histories is not None:
+                        ip_histories[ip] = outcome.updated_history
+                except Exception:
+                    pass
+
             # 先提取副作用到局部变量，再构造 Result
             side_effects = _collector.extract_and_clear()
+            if ai_block_reason:
+                side_effects['blocked_ips'] = side_effects.get('blocked_ips', []) + [(std_log.get("client_ip", ""), f"AI anomaly: {ai_block_reason}")]
+                side_effects['ai_anomaly_block'] = ai_block_reason
+            if ai_learned_keywords:
+                side_effects['learned_keywords'] = side_effects.get('learned_keywords', []) + ai_learned_keywords
             try:
                 batch_results.append(ItemSuccessResult(trace_id, rl_dec, kw_dec, side_effects))
             except Exception:
