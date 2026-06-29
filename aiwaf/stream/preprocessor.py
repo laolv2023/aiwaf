@@ -94,7 +94,8 @@ def transform_raw_log(raw_log: dict) -> dict:
     # 仅当 raw_log 中存在这些字段时才透传，非 Akto 数据源不受影响
     for k in ("akto_account_id", "akto_vxlan_id", "source", "direction",
               "dest_ip", "response_payload",
-              "request_headers", "response_headers"):
+              "request_headers", "response_headers",
+              "request_uuid"):
         if k in raw_log:
             std_log[k] = raw_log[k]
 
