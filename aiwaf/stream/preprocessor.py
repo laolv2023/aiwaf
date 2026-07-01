@@ -92,10 +92,15 @@ def transform_raw_log(raw_log: dict) -> dict:
 
     # 透传 akto 扩展字段（用于 _emit_alert 告警输出）
     # 仅当 raw_log 中存在这些字段时才透传，非 Akto 数据源不受影响
+    #
+    # V6.0 补丁：新增 api_collection_id 和 host 透传
+    #   - api_collection_id: 原生 Collection ID，透传至 MaliciousEventMessage.latest_api_collection_id (字段 7)
+    #   - host: 请求 Host，透传至 MaliciousEventMessage.host (字段 17)
     for k in ("akto_account_id", "akto_vxlan_id", "source", "direction",
               "dest_ip", "response_payload",
               "request_headers", "response_headers",
-              "request_uuid"):
+              "request_uuid",
+              "api_collection_id", "host"):  # V6.0 新增透传字段
         if k in raw_log:
             std_log[k] = raw_log[k]
 

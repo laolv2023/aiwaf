@@ -971,7 +971,7 @@ class TestEmitAlert:
 
     @pytest.mark.asyncio
     async def test_alert_has_15_fields(self, engine):
-        """告警输出包含全部 15 个字段"""
+        """告警输出包含全部字段（含 V6.0 新增的 4 个透传字段）"""
         std_log = make_std_log()
         std_log["akto_account_id"] = "1"
         std_log["akto_vxlan_id"] = "1"
@@ -983,7 +983,9 @@ class TestEmitAlert:
             "trace_id", "request_uuid", "rule_id", "alert_timestamp", "client_ip",
             "akto_account_id", "akto_vxlan_id", "source", "direction",
             "method", "uri_path", "status_code",
-            "detected_at", "severity", "req_body_truncated"
+            "detected_at", "severity", "req_body_truncated",
+            # V6.0 新增透传字段
+            "api_collection_id", "request_headers", "host", "country_code",
         }
         assert set(sent_data.keys()) == expected_keys
 

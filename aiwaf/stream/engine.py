@@ -521,6 +521,19 @@ class AIWAFStreamEngine:
             pass
 
     async def _emit_alert(self, std_log: dict, rule: str):
+        # ── V6.0 补丁：提取 country_code（GeoIP 查询） ──
+        # country_code 用于 MaliciousEventMessage.metadata.country_code
+        # 仅当 GeoIP 数据库可用时查询，避免性能损耗
+        country_code = ""
+        if (self.settings.geoip_db_path and GEOIP_AVAILABLE
+                and self.settings.detection_geo_enabled):
+            try:
+                ip = std_log.get("client_ip", "")
+                if ip:
+                    country_code = lookup_country_name(ip, self.settings.geoip_db_path) or ""
+            except Exception:
+                pass
+
         alert = {
             # 现有字段
             "trace_id": std_log.get("trace_id"),
@@ -544,6 +557,16 @@ class AIWAFStreamEngine:
             "detected_at": time.time(),
             "severity": self._classify_severity(rule),
             "req_body_truncated": std_log.get("req_body_truncated", ""),
+
+            # ── V6.0 新增字段：供 V6.0 出站适配器使用 ──
+            # api_collection_id: 原生 Collection ID（int32），透传至 latest_api_collection_id (字段 7)
+            "api_collection_id": std_log.get("api_collection_id", 0),
+            # request_headers: 请求头（JSON 字符串），用于 Raw HTTP 重构
+            "request_headers": std_log.get("request_headers", ""),
+            # host: 请求 Host，透传至 MaliciousEventMessage.host (字段 17)
+            "host": std_log.get("host", ""),
+            # country_code: 源 IP 国家代码，透传至 metadata.country_code
+            "country_code": country_code,
         }
         try:
             await self.producer.send_and_wait(self.settings.alert_topic, orjson.dumps(alert))

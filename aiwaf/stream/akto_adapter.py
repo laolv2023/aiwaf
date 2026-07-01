@@ -62,6 +62,41 @@ def parse_akto_json_message(raw_json: str) -> Dict[str, Any]:
     except (ValueError, TypeError):
         timestamp = 0.0
 
+    # ── V6.0 补丁：提取原生 api_collection_id ──
+    # 依据《V6.0 设计》第 2 节"协议映射契约"：
+    #   api_collection_id (HttpResponseParam 字段 6) → latest_api_collection_id (MaliciousEventMessage 字段 7)
+    #
+    # Akto JSON 格式中 apiCollectionId 的来源（源码级对齐）：
+    #   - HttpCallParser.parseKafkaMessage 使用 akto_vxlan_id 作为 apiCollectionId
+    #   - 部分版本可能直接包含 apiCollectionId / api_collection_id 字段
+    # 因此按优先级提取：apiCollectionId > api_collection_id > akto_vxlan_id
+    api_collection_id_raw = (
+        msg.get("apiCollectionId")
+        or msg.get("api_collection_id")
+        or msg.get("akto_vxlan_id")
+        or "0"
+    )
+    try:
+        api_collection_id = int(api_collection_id_raw)
+    except (ValueError, TypeError):
+        api_collection_id = 0
+
+    # ── V6.0 补丁：提取 host 字段 ──
+    # host 用于 MaliciousEventMessage.host (字段 17)
+    # 优先从 JSON 顶层获取，其次从 requestHeaders 中解析 Host 头
+    host = msg.get("host", "")
+    if not host:
+        try:
+            headers_str = msg.get("requestHeaders", "")
+            if headers_str:
+                # orjson.loads 返回 dict；兼容已解析的 dict 输入
+                headers_obj = orjson.loads(headers_str) if isinstance(headers_str, str) else headers_str
+                if isinstance(headers_obj, dict):
+                    # HTTP 头部大小写不敏感，尝试多种大小写
+                    host = headers_obj.get("Host") or headers_obj.get("host") or headers_obj.get("HOST") or ""
+        except (orjson.JSONDecodeError, TypeError, ValueError):
+            pass
+
     return {
         # transform_raw_log 直接读取的字段（键名必须匹配）
         "client_ip": msg.get("ip") or msg.get("client_ip") or "unknown",
@@ -81,4 +116,7 @@ def parse_akto_json_message(raw_json: str) -> Dict[str, Any]:
         "request_headers": msg.get("requestHeaders", ""),  # JSON string
         "response_headers": msg.get("responseHeaders", ""),
         "request_uuid": msg.get("request_uuid", "") or msg.get("requestUuid", ""),  # 源端 UUID（可选）
+        # V6.0 新增透传字段
+        "api_collection_id": api_collection_id,  # 原生 Collection ID（int32，透传至 latest_api_collection_id）
+        "host": host,                            # 请求 Host（透传至 MaliciousEventMessage.host）
     }

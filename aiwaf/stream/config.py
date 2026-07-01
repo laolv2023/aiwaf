@@ -166,6 +166,16 @@ class Settings:
     detection_method_post_only: bool = True      # GET→POST-only 端点检测（无误报风险）
     detection_method_unsupported: bool = False   # 不支持的 HTTP 方法检测（PUT/PATCH/DELETE 可能误报，默认关闭）
 
+    # ── V6.0 出站适配器配置 ──
+    # 依据《AIWAF 接入 Akto 架构设计方案 (V6.0 源码级对齐终版)》
+    # V6.0 适配器消费 aiwaf.alerts，注入 akto.threat_detection.malicious_events
+    akto_v6_adapter_enabled: bool = False             # V6.0 出站适配器开关（默认关闭，需独立进程运行）
+    akto_v6_malicious_events_topic: str = "akto.threat_detection.malicious_events"  # Akto 恶意事件 topic
+    akto_v6_consumer_group: str = "aiwaf-akto-adapter-v6"  # V6.0 适配器消费者组
+    akto_v6_sampler_window_seconds: int = 60          # 采样限流器窗口大小（秒）
+    akto_v6_sampler_max_samples: int = 5              # 窗口内最大采样数
+    akto_v6_max_payload_bytes: int = 4096             # Raw HTTP 安全截断阈值（字节）
+
     @classmethod
     def from_yaml(cls, path: str) -> "Settings":
         """从 YAML 配置文件加载"""
@@ -283,6 +293,13 @@ class Settings:
             "detection_method_enabled":   "DETECTION_METHOD_ENABLED",
             "detection_method_post_only": "DETECTION_METHOD_POST_ONLY",
             "detection_method_unsupported": "DETECTION_METHOD_UNSUPPORTED",
+            # V6.0 出站适配器配置
+            "akto_v6_adapter_enabled":           "AKTO_V6_ADAPTER_ENABLED",
+            "akto_v6_malicious_events_topic":    "AKTO_V6_MALICIOUS_EVENTS_TOPIC",
+            "akto_v6_consumer_group":            "AKTO_V6_CONSUMER_GROUP",
+            "akto_v6_sampler_window_seconds":    "AKTO_V6_SAMPLER_WINDOW_SECONDS",
+            "akto_v6_sampler_max_samples":       "AKTO_V6_SAMPLER_MAX_SAMPLES",
+            "akto_v6_max_payload_bytes":         "AKTO_V6_MAX_PAYLOAD_BYTES",
         }
 
         int_fields = {
@@ -303,6 +320,10 @@ class Settings:
             "header_max_bytes", "header_max_count",
             "uuid_block_threshold", "uuid_malformed_weight",
             "uuid_not_found_weight", "uuid_success_decay", "uuid_window_seconds",
+            # V6.0 出站适配器 int 字段
+            "akto_v6_sampler_window_seconds",
+            "akto_v6_sampler_max_samples",
+            "akto_v6_max_payload_bytes",
         }
 
         float_fields = {
@@ -333,6 +354,8 @@ class Settings:
             "probe_path_patterns_replace_mode",
             "post_only_suffixes_replace_mode",
             "login_paths_replace_mode",
+            # V6.0 出站适配器 bool 字段
+            "akto_v6_adapter_enabled",
         }
 
         for attr, env_key in env_map.items():
