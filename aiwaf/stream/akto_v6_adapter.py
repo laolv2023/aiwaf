@@ -6,7 +6,7 @@ AIWAF 接入 Akto V6.0 出站适配器 —— 生产级网关
 
 模块职责
 --------
-消费 AIWAF 引擎产出的告警消息（Kafka topic: aiwaf.alerts，JSON 格式），
+消费 AIWAF 引擎产出的告警消息（Kafka topic: akto.aiwaf.alerts，JSON 格式），
 经过以下五重核心处理后，转换为 Akto 原生 Protobuf 格式
 （MaliciousEventKafkaEnvelope），注入 Akto 的
 ``akto.threat_detection.malicious_events`` topic，
@@ -675,7 +675,7 @@ class AktoV6AdapterConfig:
     kafka_bootstrap_servers: str = "localhost:9092"
 
     # 消费配置
-    alert_topic: str = "aiwaf.alerts"
+    alert_topic: str = "akto.aiwaf.alerts"
     consumer_group: str = "aiwaf-akto-adapter-v6"
     consumer_auto_offset_reset: str = "latest"
     consumer_enable_auto_commit: bool = True
@@ -751,7 +751,7 @@ class AktoV6Adapter:
         """延迟初始化 Kafka 消费者和生产者。"""
         from kafka import KafkaConsumer, KafkaProducer
 
-        # ── 消费者：订阅 aiwaf.alerts ──
+        # ── 消费者：订阅 akto.aiwaf.alerts ──
         self._consumer = KafkaConsumer(
             self._config.alert_topic,
             bootstrap_servers=self._config.kafka_bootstrap_servers,
@@ -883,7 +883,7 @@ class AktoV6Adapter:
         """
         启动主消费循环。
 
-        持续消费 aiwaf.alerts topic 的告警消息，
+        持续消费 akto.aiwaf.alerts topic 的告警消息，
         经过五重处理后注入 akto.threat_detection.malicious_events topic。
 
         捕获 SIGINT/SIGTERM 信号实现优雅关闭。
@@ -1051,7 +1051,7 @@ class AktoV6Adapter:
 
 def process_stream(
     bootstrap_servers: str = "localhost:9092",
-    alert_topic: str = "aiwaf.alerts",
+    alert_topic: str = "akto.aiwaf.alerts",
     malicious_events_topic: str = "akto.threat_detection.malicious_events",
     consumer_group: str = "aiwaf-akto-adapter-v6",
 ):
@@ -1095,7 +1095,7 @@ def main():
         bootstrap_servers=os.environ.get(
             "KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"
         ),
-        alert_topic=os.environ.get("AIWAF_ALERT_TOPIC", "aiwaf.alerts"),
+        alert_topic=os.environ.get("AIWAF_ALERT_TOPIC", "akto.aiwaf.alerts"),
         malicious_events_topic=os.environ.get(
             "AKTO_MALICIOUS_EVENTS_TOPIC",
             "akto.threat_detection.malicious_events",
