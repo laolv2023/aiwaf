@@ -562,12 +562,12 @@ class TestAktoV6Adapter(unittest.TestCase):
         """允许的告警应通过五重处理并构造 Protobuf"""
         adapter = self._make_adapter()
         alert = make_alert(rule_id="KeywordBlock:sql_injection")
-        result = adapter.process_single_alert(alert)
-        self.assertTrue(result)
-        self.assertIn("_akto_envelope_bytes", alert)
+        success, envelope_bytes = adapter.process_single_alert(alert)
+        self.assertTrue(success)
+        self.assertIsNotNone(envelope_bytes)
         # 验证序列化的 Protobuf 可反序列化
         envelope = message_pb2.MaliciousEventKafkaEnvelope()
-        envelope.ParseFromString(alert["_akto_envelope_bytes"])
+        envelope.ParseFromString(envelope_bytes)
         self.assertEqual(envelope.account_id, "1000000")
         self.assertEqual(envelope.malicious_event.sub_category, "SQLInjection")
         stats = adapter.get_stats()
@@ -579,9 +579,9 @@ class TestAktoV6Adapter(unittest.TestCase):
         """被过滤的告警应被丢弃"""
         adapter = self._make_adapter()
         alert = make_alert(rule_id="RateLimitFlood")
-        result = adapter.process_single_alert(alert)
-        self.assertFalse(result)
-        self.assertNotIn("_akto_envelope_bytes", alert)
+        success, envelope_bytes = adapter.process_single_alert(alert)
+        self.assertFalse(success)
+        self.assertIsNone(envelope_bytes)
         stats = adapter.get_stats()
         self.assertEqual(stats["filtered_out"], 1)
 
@@ -593,9 +593,12 @@ class TestAktoV6Adapter(unittest.TestCase):
         alert1 = make_alert(rule_id="KeywordBlock:sql_injection", trace_id="t1")
         alert2 = make_alert(rule_id="KeywordBlock:sql_injection", trace_id="t2")
         alert3 = make_alert(rule_id="KeywordBlock:sql_injection", trace_id="t3")
-        self.assertTrue(adapter.process_single_alert(alert1))
-        self.assertTrue(adapter.process_single_alert(alert2))
-        self.assertFalse(adapter.process_single_alert(alert3))
+        s1, _ = adapter.process_single_alert(alert1)
+        s2, _ = adapter.process_single_alert(alert2)
+        s3, _ = adapter.process_single_alert(alert3)
+        self.assertTrue(s1)
+        self.assertTrue(s2)
+        self.assertFalse(s3)
         stats = adapter.get_stats()
         self.assertEqual(stats["sampled_out"], 1)
 
@@ -603,8 +606,8 @@ class TestAktoV6Adapter(unittest.TestCase):
         """缺失 akto_account_id 应被丢弃"""
         adapter = self._make_adapter()
         alert = make_alert(akto_account_id="")
-        result = adapter.process_single_alert(alert)
-        self.assertFalse(result)
+        success, _ = adapter.process_single_alert(alert)
+        self.assertFalse(success)
         stats = adapter.get_stats()
         self.assertEqual(stats["id_missing"], 1)
 
@@ -612,8 +615,8 @@ class TestAktoV6Adapter(unittest.TestCase):
         """缺失 api_collection_id 应被丢弃"""
         adapter = self._make_adapter()
         alert = make_alert(api_collection_id=0)
-        result = adapter.process_single_alert(alert)
-        self.assertFalse(result)
+        success, _ = adapter.process_single_alert(alert)
+        self.assertFalse(success)
         stats = adapter.get_stats()
         self.assertEqual(stats["id_missing"], 1)
 
@@ -630,14 +633,15 @@ class TestAktoV6Adapter(unittest.TestCase):
                 alert = make_alert(rule_id=rule_id, trace_id=f"trace-{rule_id}")
                 # 每次使用不同的 IP 避免采样器干扰
                 alert["client_ip"] = f"10.0.0.{hash(rule_id) % 255}"
-                result = adapter.process_single_alert(alert)
-                self.assertTrue(result)
+                success, envelope_bytes = adapter.process_single_alert(alert)
+                self.assertTrue(success)
+                self.assertIsNotNone(envelope_bytes)
 
     def test_process_invalid_json_alert(self):
         """无效告警（None）应被丢弃并计入 errors"""
         adapter = self._make_adapter()
-        result = adapter.process_single_alert(None)
-        self.assertFalse(result)
+        success, _ = adapter.process_single_alert(None)
+        self.assertFalse(success)
         stats = adapter.get_stats()
         self.assertEqual(stats["errors"], 1)
 

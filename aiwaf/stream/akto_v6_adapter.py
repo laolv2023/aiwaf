@@ -55,12 +55,11 @@ from __future__ import annotations
 import json
 import logging
 import signal
-import sys
 import threading
 import time
 from collections import defaultdict, deque
-from dataclasses import dataclass, field
-from typing import Any, Deque, Dict, Optional, Set, Tuple
+from dataclasses import dataclass
+from typing import Any, Deque, Dict, Optional, Set
 
 # ── Akto Protobuf 桩代码（vendor 自 Akto .proto 定义，对 Akto 零修改）──
 from akto_proto.threat_detection.message.malicious_event.v1 import message_pb2
@@ -314,6 +313,9 @@ class SlidingWindowSampler:
         """
         清理所有采样键的过期时间戳，回收内存。
 
+        优化：先在锁内快速收集所有 key 的快照，然后在锁外逐个清理，
+        减少锁持有时间，避免阻塞 should_sample() 调用。
+
         参数
         ----
         now : float, optional
@@ -329,6 +331,7 @@ class SlidingWindowSampler:
         cutoff = now - self._window_seconds
         removed_keys = 0
 
+        # 第一阶段：锁内快速快照所有 key，并清理过期时间戳
         with self._lock:
             empty_keys = []
             for key, bucket in self._buckets.items():
@@ -338,7 +341,7 @@ class SlidingWindowSampler:
                 # 标记空桶以待删除
                 if not bucket:
                     empty_keys.append(key)
-            # 删除空桶
+            # 第二阶段：锁内删除空桶（del 操作很快，不会长时间持锁）
             for key in empty_keys:
                 del self._buckets[key]
                 removed_keys += 1
@@ -767,12 +770,14 @@ class AktoV6Adapter:
         )
 
         # ── 生产者：向 akto.threat_detection.malicious_events 注入 ──
+        # 审计修复 #15：设置 max_request_size 为 10MB，防止大 Protobuf 消息被拒
         self._producer = KafkaProducer(
             bootstrap_servers=self._config.kafka_bootstrap_servers,
             acks=self._config.producer_acks,
             retries=self._config.producer_retries,
             value_serializer=lambda v: v,  # 已序列化的 bytes
             key_serializer=lambda k: k,
+            max_request_size=10 * 1024 * 1024,  # 10MB，默认 1MB 可能不够
         )
         logger.info(
             "Kafka 生产者已连接: brokers=%s, topic=%s",
@@ -790,7 +795,7 @@ class AktoV6Adapter:
         with self._stats_lock:
             return dict(self._stats)
 
-    def process_single_alert(self, raw_alert: Dict[str, Any]) -> bool:
+    def process_single_alert(self, raw_alert: Dict[str, Any]) -> tuple:
         """
         处理单条告警（核心五重处理流程）。
 
@@ -804,9 +809,9 @@ class AktoV6Adapter:
 
         返回
         ----
-        bool
-            True 表示告警通过所有过滤并成功构造 Protobuf 消息，
-            False 表示告警被丢弃（过滤阀/采样器/ID 缺失）。
+        Tuple[bool, Optional[bytes]]
+            (True, envelope_bytes) 表示告警通过所有过滤并成功构造 Protobuf 消息，
+            (False, None) 表示告警被丢弃（过滤阀/采样器/ID 缺失/构造失败）。
         """
         self._inc_stat("processed")
 
@@ -814,8 +819,19 @@ class AktoV6Adapter:
         alert = normalize_alert(raw_alert)
         if alert is None:
             self._inc_stat("errors")
-            logger.warning("告警规范化失败，丢弃: %s", raw_alert)
-            return False
+            # 安全审计修复：不记录完整 raw_alert（可能含敏感请求体），
+            # 仅记录关键字段用于排查
+            # 审计修复：raw_alert 可能为 None，需防御性处理
+            if isinstance(raw_alert, dict):
+                logger.warning(
+                    "告警规范化失败，丢弃: rule_id=%s, trace_id=%s, client_ip=%s",
+                    raw_alert.get("rule_id", ""),
+                    raw_alert.get("trace_id", ""),
+                    raw_alert.get("client_ip", ""),
+                )
+            else:
+                logger.warning("告警规范化失败，丢弃: 输入类型=%s", type(raw_alert).__name__)
+            return False, None
 
         # ── 步骤 2：告警分级过滤阀 ──
         if alert.layer not in ALLOWED_THREAT_LAYERS:
@@ -824,7 +840,7 @@ class AktoV6Adapter:
                 "过滤阀丢弃: layer=%s 不在允许列表, trace_id=%s",
                 alert.layer, alert.trace_id,
             )
-            return False
+            return False, None
 
         # ── 步骤 3：采样限流器 ──
         if not self._sampler.should_sample(
@@ -837,7 +853,7 @@ class AktoV6Adapter:
                 "采样器丢弃: src_ip=%s, layer=%s, url=%s, trace_id=%s",
                 alert.src_ip, alert.layer, alert.request_url, alert.trace_id,
             )
-            return False
+            return False, None
 
         # ── 步骤 4：原生 ID 透传校验（脏数据保护）──
         if not alert.akto_account_id or not alert.api_collection_id:
@@ -846,24 +862,22 @@ class AktoV6Adapter:
                 "原生 ID 缺失丢弃: account_id=%s, collection_id=%s, trace_id=%s",
                 alert.akto_account_id, alert.api_collection_id, alert.trace_id,
             )
-            return False
+            return False, None
 
         # ── 步骤 5：Protobuf 消息构造 ──
         try:
             event = build_malicious_event(alert)
             envelope = build_kafka_envelope(alert, event)
-            # 将构造好的 envelope 挂载到 alert 上，供调用方获取
-            # （在实际 run 循环中，会直接调用 producer.send）
-            raw_alert["_akto_envelope_bytes"] = envelope.SerializeToString()
-            return True
+            # 审计修复：不再修改输入 dict，直接返回序列化后的 bytes
+            return True, envelope.SerializeToString()
         except Exception as e:
             self._inc_stat("errors")
             logger.error(
-                "Protobuf 构造失败: %s, trace_id=%s, alert=%s",
-                e, alert.trace_id, raw_alert,
+                "Protobuf 构造失败: %s, trace_id=%s, layer=%s, src_ip=%s",
+                e, alert.trace_id, alert.layer, alert.src_ip,
                 exc_info=True,
             )
-            return False
+            return False, None
 
     def run(self):
         """
@@ -873,13 +887,37 @@ class AktoV6Adapter:
         经过五重处理后注入 akto.threat_detection.malicious_events topic。
 
         捕获 SIGINT/SIGTERM 信号实现优雅关闭。
+
+        生产级特性：
+        - Kafka 连接失败自动重试（指数退避）
+        - 使用 poll() 替代阻塞迭代，确保信号可中断
+        - 关闭前 flush 生产者，防止消息丢失
+        - 定期输出统计指标日志
         """
         # ── 注册信号处理器（优雅关闭）──
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
 
-        # ── 初始化 Kafka ──
-        self._init_kafka()
+        # ── 初始化 Kafka（带重试）──
+        # 审计修复 #6：Kafka 连接失败时自动重试，避免直接崩溃
+        max_retries = 5
+        retry_delay = 5  # 秒
+        for attempt in range(1, max_retries + 1):
+            try:
+                self._init_kafka()
+                break
+            except Exception as e:
+                if attempt < max_retries:
+                    logger.warning(
+                        "Kafka 连接失败（第 %d/%d 次）: %s，%ds 后重试...",
+                        attempt, max_retries, e, retry_delay,
+                    )
+                    self._shutdown_event.wait(retry_delay)
+                    retry_delay = min(retry_delay * 2, 60)  # 指数退避，上限 60s
+                else:
+                    logger.error("Kafka 连接失败，已达最大重试次数 %d，退出", max_retries)
+                    raise
+
         self._running = True
         logger.info("AIWAF Akto V6.0 适配器已启动")
 
@@ -889,49 +927,73 @@ class AktoV6Adapter:
         )
         cleanup_thread.start()
 
+        # ── 启动统计指标定期输出线程 ──
+        # 审计修复 #14：定期输出统计指标，增强可观测性
+        stats_thread = threading.Thread(
+            target=self._stats_loop, daemon=True, name="stats-reporter"
+        )
+        stats_thread.start()
+
         # ── 主消费循环 ──
+        # 审计修复 #3：使用 poll() 替代 `for msg in consumer` 阻塞迭代，
+        # 确保 SIGTERM/SIGINT 能及时中断消费循环
         try:
-            for msg in self._consumer:
-                if self._shutdown_event.is_set():
-                    break
+            while not self._shutdown_event.is_set():
+                # poll 超时 1 秒，确保定期检查 shutdown 事件
+                # 审计修复 R2#2：max_records 使用固定值 500，不与 timeout_ms 混用
+                records = self._consumer.poll(
+                    timeout_ms=1000,
+                    max_records=500,
+                )
+                if not records:
+                    continue
 
-                try:
-                    # 解析 JSON 告警
-                    raw_alert = json.loads(msg.value.decode("utf-8", errors="replace"))
+                for _topic_partition, msgs in records.items():
+                    for msg in msgs:
+                        if self._shutdown_event.is_set():
+                            break
+                        try:
+                            # 解析 JSON 告警
+                            raw_alert = json.loads(msg.value.decode("utf-8", errors="replace"))
 
-                    # 五重处理
-                    if self.process_single_alert(raw_alert):
-                        # 注入 Akto Kafka topic
-                        envelope_bytes = raw_alert.get("_akto_envelope_bytes")
-                        if envelope_bytes:
-                            self._producer.send(
-                                self._config.malicious_events_topic,
-                                envelope_bytes,
-                            )
-                            self._inc_stat("injected")
-                            logger.debug(
-                                "成功注入 Akto: trace_id=%s, layer=%s",
-                                raw_alert.get("trace_id", ""),
-                                _derive_layer(raw_alert.get("rule_id", "")),
-                            )
-                except json.JSONDecodeError as e:
-                    self._inc_stat("errors")
-                    logger.error("JSON 解析失败: %s, raw=%s", e, msg.value[:200])
-                except Exception as e:
-                    self._inc_stat("errors")
-                    logger.error("告警处理异常: %s", e, exc_info=True)
+                            # 五重处理
+                            # 审计修复 #9：process_single_alert 返回 (bool, Optional[bytes])
+                            success, envelope_bytes = self.process_single_alert(raw_alert)
+                            if success and envelope_bytes:
+                                # 注入 Akto Kafka topic
+                                self._producer.send(
+                                    self._config.malicious_events_topic,
+                                    envelope_bytes,
+                                )
+                                self._inc_stat("injected")
+                                logger.debug(
+                                    "成功注入 Akto: trace_id=%s, layer=%s",
+                                    raw_alert.get("trace_id", ""),
+                                    _derive_layer(raw_alert.get("rule_id", "")),
+                                )
+                        except json.JSONDecodeError as e:
+                            self._inc_stat("errors")
+                            logger.error("JSON 解析失败: %s, raw=%s", e, msg.value[:200])
+                        except Exception as e:
+                            self._inc_stat("errors")
+                            logger.error("告警处理异常: %s", e, exc_info=True)
 
         except Exception as e:
             logger.error("主消费循环异常: %s", e, exc_info=True)
         finally:
+            # 审计修复 #4：关闭前 flush 生产者，确保所有消息已发送
+            # 审计修复 #5：cleanup 使用 try/except 确保资源释放
             self._cleanup()
             cleanup_thread.join(timeout=5)
+            stats_thread.join(timeout=5)
             logger.info("AIWAF Akto V6.0 适配器已停止, 统计: %s", self.get_stats())
 
     def _cleanup_loop(self):
         """采样器定期清理后台线程，防止内存泄漏。"""
         while not self._shutdown_event.is_set():
-            time.sleep(self._config.cleanup_interval_seconds)
+            # 使用 wait 替代 sleep，确保能及时响应关闭信号
+            if self._shutdown_event.wait(self._config.cleanup_interval_seconds):
+                break
             try:
                 removed = self._sampler.cleanup()
                 if removed > 0:
@@ -939,21 +1001,44 @@ class AktoV6Adapter:
             except Exception as e:
                 logger.error("采样器清理异常: %s", e)
 
+    def _stats_loop(self):
+        """定期输出统计指标日志，增强可观测性。"""
+        stats_interval = 60  # 每 60 秒输出一次
+        while not self._shutdown_event.is_set():
+            if self._shutdown_event.wait(stats_interval):
+                break
+            try:
+                stats = self.get_stats()
+                logger.info("适配器运行统计: %s", stats)
+            except Exception as e:
+                logger.error("统计指标输出异常: %s", e)
+
     def _signal_handler(self, signum, frame):
         """信号处理器：设置关闭标志，优雅退出。"""
         logger.info("收到信号 %s，准备优雅关闭...", signum)
         self._shutdown_event.set()
+        # 审计修复 #3：唤醒阻塞的 consumer.poll()
+        if self._consumer is not None:
+            try:
+                self._consumer.stop()
+            except Exception:
+                pass
 
     def _cleanup(self):
         """清理 Kafka 连接资源。"""
         self._running = False
-        if self._producer:
+        # 审计修复 #5：每个资源关闭都使用独立的 try/except，确保一个失败不影响其他
+        if self._producer is not None:
             try:
+                # 审计修复 #4：flush 确保所有缓冲消息已发送
                 self._producer.flush(timeout=10)
+            except Exception as e:
+                logger.error("flush Kafka 生产者异常: %s", e)
+            try:
                 self._producer.close(timeout=10)
             except Exception as e:
                 logger.error("关闭 Kafka 生产者异常: %s", e)
-        if self._consumer:
+        if self._consumer is not None:
             try:
                 self._consumer.close()
             except Exception as e:

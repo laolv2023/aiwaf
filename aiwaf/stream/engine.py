@@ -531,8 +531,12 @@ class AIWAFStreamEngine:
                 ip = std_log.get("client_ip", "")
                 if ip:
                     country_code = lookup_country_name(ip, self.settings.geoip_db_path) or ""
-            except Exception:
-                pass
+            except Exception as e:
+                # 审计修复 #2：GeoIP 查询异常不再静默吞没，记录警告日志
+                import logging as _logging
+                _logging.getLogger("aiwaf.engine").warning(
+                    "GeoIP 查询异常: %s, ip=%s", e, std_log.get("client_ip", "")
+                )
 
         alert = {
             # 现有字段
@@ -570,8 +574,13 @@ class AIWAFStreamEngine:
         }
         try:
             await self.producer.send_and_wait(self.settings.alert_topic, orjson.dumps(alert))
-        except Exception:
-            pass
+        except Exception as e:
+            # 审计修复 #1：Kafka 发送异常不再静默吞没，记录错误日志
+            import logging as _logging
+            _logging.getLogger("aiwaf.engine").error(
+                "告警发送到 Kafka 失败: %s, trace_id=%s, rule=%s",
+                e, std_log.get("trace_id", ""), rule,
+            )
 
     def _should_check_header(self, ip: str, path: str, skip_ips: str, skip_paths: str) -> bool:
         """判断是否需要对该 IP/路径进行请求头检查"""
