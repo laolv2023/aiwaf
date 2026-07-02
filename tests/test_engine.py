@@ -88,6 +88,30 @@ class MockSettings:
     probe_path_patterns_replace_mode: bool = False
     post_only_suffixes_replace_mode: bool = False
     login_paths_replace_mode: bool = False
+    # 补充缺失的配置项（与 Settings 对齐）
+    header_required: str = "user-agent,accept"
+    header_skip_ips: str = ""
+    header_skip_paths: str = ""
+    header_max_ua_length: int = 500
+    header_max_accept_length: int = 4096
+    header_suspicious_ua: str = ""
+    header_legitimate_bots: str = ""
+    ai_min_logs: int = 50
+    ai_contamination: float = 0.05
+    ai_n_estimators: int = 100
+    ai_max_samples: str = "auto"
+    ai_anomaly_enabled: bool = False
+    ai_anomaly_window: int = 300
+    honeypot_ttl: int = 300
+    keyword_min_segment_length: int = 3
+    background_sync_interval: int = 5
+    # V6.0 适配器配置
+    akto_v6_adapter_enabled: bool = False
+    akto_v6_malicious_events_topic: str = "akto.threat_detection.malicious_events"
+    akto_v6_consumer_group: str = "aiwaf-akto-adapter-v6"
+    akto_v6_sampler_window_seconds: int = 60
+    akto_v6_sampler_max_samples: int = 5
+    akto_v6_max_payload_bytes: int = 4096
 
 
 class MockStateMgr:
@@ -123,11 +147,11 @@ class TestEngineNormalPath:
     @pytest.fixture
     def engine(self):
         with patch('concurrent.futures.ProcessPoolExecutor', MagicMock()):
-            with patch('aiokafka.AIOKafkaProducer', MagicMock()):
+            with patch('aiwaf.stream.engine.AIOKafkaProducer', MagicMock()):
                 with patch('aiwaf.stream.acl_bootstrap.init_worker'):
                     with patch('aiwaf.stream.acl_bootstrap.run_core_logic_batch_isolated'):
                         from aiwaf.stream.engine import AIWAFStreamEngine
-                        import redis_facade
+                        from aiwaf.stream import redis_facade
                         redis_facade.local_blacklist.clear()
                         redis_facade.local_rate_limit.clear()
                         redis_facade._current_buffer.clear()
@@ -239,11 +263,11 @@ class TestFailSecure:
     @pytest.fixture
     def engine(self):
         with patch('concurrent.futures.ProcessPoolExecutor', MagicMock()):
-            with patch('aiokafka.AIOKafkaProducer', MagicMock()):
+            with patch('aiwaf.stream.engine.AIOKafkaProducer', MagicMock()):
                 with patch('aiwaf.stream.acl_bootstrap.init_worker'):
                     with patch('aiwaf.stream.acl_bootstrap.run_core_logic_batch_isolated'):
                         from aiwaf.stream.engine import AIWAFStreamEngine
-                        import redis_facade
+                        from aiwaf.stream import redis_facade
                         redis_facade.local_blacklist.clear()
                         redis_facade.local_rate_limit.clear()
                         redis_facade._current_buffer.clear()
@@ -373,7 +397,7 @@ class TestBatchAndDLQ:
                     with patch('aiwaf.stream.acl_bootstrap.init_worker'):
                         with patch('aiwaf.stream.acl_bootstrap.run_core_logic_batch_isolated'):
                             from aiwaf.stream.engine import AIWAFStreamEngine
-                            import redis_facade
+                            from aiwaf.stream import redis_facade
                             redis_facade.local_blacklist.clear()
                             redis_facade.local_rate_limit.clear()
                             eng = AIWAFStreamEngine(MockSettings(), MockStateMgr(), "/f")
@@ -602,7 +626,7 @@ class TestSupplementaryEngine:
                     with patch('aiwaf.stream.acl_bootstrap.init_worker'):
                         with patch('aiwaf.stream.acl_bootstrap.run_core_logic_batch_isolated'):
                             from aiwaf.stream.engine import AIWAFStreamEngine
-                            import redis_facade
+                            from aiwaf.stream import redis_facade
                             redis_facade.local_blacklist.clear()
                             redis_facade.local_rate_limit.clear()
                             eng = AIWAFStreamEngine(MockSettings(), MockStateMgr(), "/f")
@@ -769,11 +793,11 @@ class TestDeepFailSecure:
     @pytest.fixture
     def engine(self):
         with patch('concurrent.futures.ProcessPoolExecutor', MagicMock()):
-            with patch('aiokafka.AIOKafkaProducer', MagicMock()):
+            with patch('aiwaf.stream.engine.AIOKafkaProducer', MagicMock()):
                 with patch('aiwaf.stream.acl_bootstrap.init_worker'):
                     with patch('aiwaf.stream.acl_bootstrap.run_core_logic_batch_isolated'):
                         from aiwaf.stream.engine import AIWAFStreamEngine
-                        import redis_facade
+                        from aiwaf.stream import redis_facade
                         redis_facade.local_blacklist.clear()
                         redis_facade.local_rate_limit.clear()
                         redis_facade._current_buffer.clear()
@@ -866,7 +890,7 @@ class TestDeepDLQ:
     @pytest.fixture
     def engine(self):
         with patch('concurrent.futures.ProcessPoolExecutor', MagicMock()):
-            with patch('aiokafka.AIOKafkaProducer', MagicMock()):
+            with patch('aiwaf.stream.engine.AIOKafkaProducer', MagicMock()):
                 with patch('aiwaf.stream.acl_bootstrap.init_worker'):
                     with patch('aiwaf.stream.acl_bootstrap.run_core_logic_batch_isolated'):
                         from aiwaf.stream.engine import AIWAFStreamEngine
@@ -932,7 +956,7 @@ class TestDeepConcurrency:
     @pytest.fixture
     def engine(self):
         with patch('concurrent.futures.ProcessPoolExecutor', MagicMock()):
-            with patch('aiokafka.AIOKafkaProducer', MagicMock()):
+            with patch('aiwaf.stream.engine.AIOKafkaProducer', MagicMock()):
                 with patch('aiwaf.stream.acl_bootstrap.init_worker'):
                     with patch('aiwaf.stream.acl_bootstrap.run_core_logic_batch_isolated'):
                         from aiwaf.stream.engine import AIWAFStreamEngine
@@ -1000,7 +1024,7 @@ class TestDeepKeywordAndAlert:
     @pytest.fixture
     def engine(self):
         with patch('concurrent.futures.ProcessPoolExecutor', MagicMock()):
-            with patch('aiokafka.AIOKafkaProducer', MagicMock()):
+            with patch('aiwaf.stream.engine.AIOKafkaProducer', MagicMock()):
                 with patch('aiwaf.stream.acl_bootstrap.init_worker'):
                     with patch('aiwaf.stream.acl_bootstrap.run_core_logic_batch_isolated'):
                         from aiwaf.stream.engine import AIWAFStreamEngine
@@ -1091,11 +1115,11 @@ class TestDeepEngineExtra:
     @pytest.fixture
     def engine(self):
         with patch('concurrent.futures.ProcessPoolExecutor', MagicMock()):
-            with patch('aiokafka.AIOKafkaProducer', MagicMock()):
+            with patch('aiwaf.stream.engine.AIOKafkaProducer', MagicMock()):
                 with patch('aiwaf.stream.acl_bootstrap.init_worker'):
                     with patch('aiwaf.stream.acl_bootstrap.run_core_logic_batch_isolated'):
                         from aiwaf.stream.engine import AIWAFStreamEngine
-                        import redis_facade
+                        from aiwaf.stream import redis_facade
                         redis_facade.local_blacklist.clear()
                         redis_facade.local_rate_limit.clear()
                         redis_facade._current_buffer.clear()
@@ -1273,11 +1297,11 @@ class TestFinalEngine:
     @pytest.fixture
     def engine(self):
         with patch('concurrent.futures.ProcessPoolExecutor', MagicMock()):
-            with patch('aiokafka.AIOKafkaProducer', MagicMock()):
+            with patch('aiwaf.stream.engine.AIOKafkaProducer', MagicMock()):
                 with patch('aiwaf.stream.acl_bootstrap.init_worker'):
                     with patch('aiwaf.stream.acl_bootstrap.run_core_logic_batch_isolated'):
                         from aiwaf.stream.engine import AIWAFStreamEngine
-                        import redis_facade
+                        from aiwaf.stream import redis_facade
                         redis_facade.local_blacklist.clear()
                         redis_facade.local_rate_limit.clear()
                         redis_facade._current_buffer.clear()

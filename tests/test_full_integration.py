@@ -441,10 +441,10 @@ class TestConfigYAML:
         assert s.redis_cluster_url == "redis://localhost:6379"
 
     def test_total_config_items(self):
-        """配置项总数 = 50"""
+        """配置项总数 = 89（含 V6.0 适配器 6 项）"""
         from dataclasses import fields
         count = len(fields(Settings))
-        assert count == 83, f"Expected 51 config fields, got {count}"
+        assert count == 89, f"Expected 89 config fields, got {count}"
 
 
 # ============================================================

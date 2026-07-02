@@ -5,7 +5,7 @@ import asyncio
 import ipaddress
 import time
 import orjson
-from aiwaf.stream.asyncbreaker import CircuitBreaker
+from aiwaf.stream.asyncbreaker import CircuitBreaker, CircuitBreakerError
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from typing import List
@@ -18,6 +18,9 @@ from aiwaf.stream.redis_facade import (
     local_blacklist, local_rate_limit,
     _current_buffer, _backup_buffer, background_sync_worker
 )
+# 注意: local_blacklist, local_rate_limit, _current_buffer, _backup_buffer
+# 会被 init_fail_secure() 重新赋值，因此需要通过模块引用访问
+import aiwaf.stream.redis_facade as _rf_mod
 from aiwaf.core.rate_limit import FLOOD_BLOCK
 from aiwaf.stream.akto_adapter import parse_akto_json_message
 from aiwaf.stream.preprocessor import transform_raw_log, init_body_limits
@@ -200,7 +203,7 @@ class AIWAFStreamEngine:
         while not self._cancel_event.is_set():
             try:
                 self.dynamic_keywords_cache = await self.facade.get_top_keywords(self.settings.keyword_top_n)
-            except (asyncbreaker.CircuitBreakerError, OSError, asyncio.TimeoutError):
+            except (CircuitBreakerError, OSError, asyncio.TimeoutError):
                 pass
             try:
                 await asyncio.wait_for(
@@ -300,6 +303,7 @@ class AIWAFStreamEngine:
         trace_id = std_log.get("trace_id", "unknown")
         ip = std_log.get("client_ip", "unknown")
         event_time = std_log.get("timestamp", 0.0)
+        uri_path = std_log.get("uri_path", "/")
 
         # 记录路径到 Path Manifest（用于 path_exists 判定）
         self.path_manifest.record(
@@ -352,7 +356,7 @@ class AIWAFStreamEngine:
                 pass
 
         # ── 路径豁免检查（配置 + 运行时 Redis）──
-        uri_path = std_log.get("uri_path", "")
+        # 注意：uri_path 已在函数开头赋值，此处不再重复赋值
         skip_paths = [s.strip() for s in self.settings.header_skip_paths.split(",") if s.strip()]
         for prefix in skip_paths:
             if uri_path.startswith(prefix):
@@ -426,6 +430,7 @@ class AIWAFStreamEngine:
 
         redis_available = True
         try:
+            import logging as _lg
             if await self.facade.is_duplicate_and_add(trace_id, is_retry, retry_count):
                 return
             if self.settings.detection_rate_limit_enabled:
@@ -436,26 +441,25 @@ class AIWAFStreamEngine:
                 )
             else:
                 timestamps = []
-        except asyncbreaker.CircuitBreakerError:
+        except CircuitBreakerError:
             redis_available = False
-
             # Fail-Secure 本地防线（可全局关闭）
             if not self.settings.detection_fail_secure_enabled:
                 return
-            if ip in local_blacklist or ip in _current_buffer or ip in _backup_buffer:
+            if ip in _rf_mod.local_blacklist or ip in _rf_mod._current_buffer or ip in _rf_mod._backup_buffer:
                 try:
                     await self._emit_alert(std_log, "Local_Blacklist_Block")
                 except Exception:
                     pass
                 return
 
-            local_rate_limit[ip] = local_rate_limit.get(ip, 0) + 1
+            _rf_mod.local_rate_limit[ip] = _rf_mod.local_rate_limit.get(ip, 0) + 1
             fail_secure_limit = await self.config_override.get_async("fail_secure_local_limit", self.settings.fail_secure_local_limit)
-            if local_rate_limit[ip] > fail_secure_limit:
+            if _rf_mod.local_rate_limit[ip] > fail_secure_limit:
                 auto_block = await self.config_override.get_async("auto_block_enabled", self.settings.auto_block_enabled)
                 if auto_block:
-                    local_blacklist[ip] = True
-                    _backup_buffer.append(ip)
+                    _rf_mod.local_blacklist[ip] = True
+                    _rf_mod._backup_buffer.append(ip)
                 try:
                     await self._emit_alert(std_log, "Local_RateLimit_Block")
                 except Exception:

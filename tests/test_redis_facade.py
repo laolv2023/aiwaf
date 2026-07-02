@@ -123,7 +123,7 @@ class TestRedisClusterStateManager:
 
     @pytest.fixture
     def mgr(self):
-        from redis_facade import RedisClusterStateManager
+        from aiwaf.stream.redis_facade import RedisClusterStateManager
         with patch('redis.asyncio.from_url', return_value=MockRedis()):
             return RedisClusterStateManager("redis://localhost")
 
@@ -235,28 +235,28 @@ class TestLocalDefense:
     """Fail-Secure 本地防线：黑名单 + 限流 + 双缓冲"""
 
     def setup_method(self):
-        from redis_facade import local_blacklist, local_rate_limit
+        from aiwaf.stream.redis_facade import local_blacklist, local_rate_limit
         local_blacklist.clear()
         local_rate_limit.clear()
 
     def test_local_blacklist_stores_ip(self):
-        from redis_facade import local_blacklist
+        from aiwaf.stream.redis_facade import local_blacklist
         local_blacklist["1.1.1.1"] = True
         assert "1.1.1.1" in local_blacklist
 
     def test_local_blacklist_check_false_for_new_ip(self):
-        from redis_facade import local_blacklist
+        from aiwaf.stream.redis_facade import local_blacklist
         assert "9.9.9.9" not in local_blacklist
 
     def test_local_rate_limit_increments(self):
-        from redis_facade import local_rate_limit
+        from aiwaf.stream.redis_facade import local_rate_limit
         ip = "1.1.1.1"
         local_rate_limit[ip] = local_rate_limit.get(ip, 0) + 1
         local_rate_limit[ip] = local_rate_limit.get(ip, 0) + 1
         assert local_rate_limit[ip] == 2
 
     def test_local_rate_limit_exceeds_threshold(self):
-        from redis_facade import local_rate_limit, local_blacklist
+        from aiwaf.stream.redis_facade import local_rate_limit, local_blacklist
         ip = "3.3.3.3"
         for _ in range(51):
             local_rate_limit[ip] = local_rate_limit.get(ip, 0) + 1
@@ -265,41 +265,41 @@ class TestLocalDefense:
         assert local_blacklist.get(ip) is True
 
     def test_local_rate_limit_below_threshold(self):
-        from redis_facade import local_rate_limit, local_blacklist
+        from aiwaf.stream.redis_facade import local_rate_limit, local_blacklist
         ip = "4.4.4.4"
         for _ in range(50):
             local_rate_limit[ip] = local_rate_limit.get(ip, 0) + 1
         assert local_blacklist.get(ip) is not True
 
     def test_double_buffer_initial_state(self):
-        from redis_facade import _current_buffer, _backup_buffer
+        from aiwaf.stream.redis_facade import _current_buffer, _backup_buffer
         assert isinstance(_current_buffer, collections.deque)
         assert isinstance(_backup_buffer, collections.deque)
 
     def test_double_buffer_append_to_backup(self):
-        from redis_facade import _backup_buffer
+        from aiwaf.stream.redis_facade import _backup_buffer
         _backup_buffer.append("1.1.1.1")
         _backup_buffer.append("2.2.2.2")
         assert len(_backup_buffer) >= 2
 
     def test_double_buffer_pointer_swap(self):
-        from redis_facade import _current_buffer, _backup_buffer
+        from aiwaf.stream.redis_facade import _current_buffer, _backup_buffer
         old_cur = _current_buffer
         old_bak = _backup_buffer
         # manual swap (simulating worker)
-        import redis_facade as rf
+        from aiwaf.stream import redis_facade as rf
         rf._current_buffer, rf._backup_buffer = _backup_buffer, _current_buffer
         assert rf._current_buffer is old_bak
         assert rf._backup_buffer is old_cur
 
     def test_ip_check_in_current_buffer(self):
         """验证 IP 在 current_buffer 中的检查逻辑"""
-        from redis_facade import _current_buffer
+        from aiwaf.stream.redis_facade import _current_buffer
         _current_buffer.append("5.5.5.5")
         assert "5.5.5.5" in _current_buffer
 
     def test_ip_check_in_backup_buffer(self):
-        from redis_facade import _backup_buffer
+        from aiwaf.stream.redis_facade import _backup_buffer
         _backup_buffer.append("6.6.6.6")
         assert "6.6.6.6" in _backup_buffer
 
@@ -351,7 +351,7 @@ class TestDoubleBufferSync:
 class TestDeepSETNX:
     @pytest.fixture
     def mgr(self):
-        from redis_facade import RedisClusterStateManager
+        from aiwaf.stream.redis_facade import RedisClusterStateManager
         with patch('redis.asyncio.from_url', return_value=MockRedis()):
             return RedisClusterStateManager("redis://localhost")
 
@@ -389,7 +389,7 @@ class TestDeepSETNX:
 class TestDeepPipeline:
     @pytest.fixture
     def mgr(self):
-        from redis_facade import RedisClusterStateManager
+        from aiwaf.stream.redis_facade import RedisClusterStateManager
         with patch('redis.asyncio.from_url', return_value=MockRedis()):
             return RedisClusterStateManager("redis://localhost")
 
@@ -471,26 +471,26 @@ class TestDeepPipeline:
 
 class TestDeepLocalDefense:
     def setup_method(self):
-        from redis_facade import local_blacklist, local_rate_limit
+        from aiwaf.stream.redis_facade import local_blacklist, local_rate_limit
         local_blacklist.clear()
         local_rate_limit.clear()
 
     def test_rate_limit_exact_50(self):
-        from redis_facade import local_rate_limit
+        from aiwaf.stream.redis_facade import local_rate_limit
         ip = "50cnt"
         for _ in range(50):
             local_rate_limit[ip] = local_rate_limit.get(ip, 0) + 1
         assert local_rate_limit[ip] == 50
 
     def test_rate_limit_exact_51(self):
-        from redis_facade import local_rate_limit
+        from aiwaf.stream.redis_facade import local_rate_limit
         ip = "51cnt"
         for _ in range(51):
             local_rate_limit[ip] = local_rate_limit.get(ip, 0) + 1
         assert local_rate_limit[ip] == 51
 
     def test_rate_limit_boundary_50_vs_51_trigger(self):
-        from redis_facade import local_rate_limit, local_blacklist
+        from aiwaf.stream.redis_facade import local_rate_limit, local_blacklist
         ip = "boundary"
         for i in range(51):
             local_rate_limit[ip] = local_rate_limit.get(ip, 0) + 1
@@ -500,7 +500,7 @@ class TestDeepLocalDefense:
         assert local_blacklist.get(ip) is True
 
     def test_blacklist_multiple_ips(self):
-        from redis_facade import local_blacklist
+        from aiwaf.stream.redis_facade import local_blacklist
         for ip in ["1.1.1.1","2.2.2.2","3.3.3.3"]:
             local_blacklist[ip] = True
         assert "1.1.1.1" in local_blacklist
@@ -508,42 +508,42 @@ class TestDeepLocalDefense:
         assert "3.3.3.3" in local_blacklist
 
     def test_blacklist_ip_not_present(self):
-        from redis_facade import local_blacklist
+        from aiwaf.stream.redis_facade import local_blacklist
         assert "255.255.255.255" not in local_blacklist
 
     def test_rate_limit_reset_per_ip(self):
-        from redis_facade import local_rate_limit
+        from aiwaf.stream.redis_facade import local_rate_limit
         local_rate_limit["a"] = 10
         local_rate_limit["b"] = 20
         assert local_rate_limit["a"] == 10
         assert local_rate_limit["b"] == 20
 
     def test_rate_limit_initial_count_zero(self):
-        from redis_facade import local_rate_limit
+        from aiwaf.stream.redis_facade import local_rate_limit
         assert local_rate_limit.get("new", 0) == 0
 
 
 class TestDeepDoubleBuffer:
     def setup_method(self):
-        from redis_facade import _current_buffer, _backup_buffer
+        from aiwaf.stream.redis_facade import _current_buffer, _backup_buffer
         _current_buffer.clear()
         _backup_buffer.clear()
 
     def test_buffer_append_records(self):
-        from redis_facade import _backup_buffer
+        from aiwaf.stream.redis_facade import _backup_buffer
         for i in range(100):
             _backup_buffer.append(f"10.0.0.{i}")
         assert len(_backup_buffer) == 100
 
     def test_buffer_overflow_fifo(self):
-        from redis_facade import _current_buffer
-        import redis_facade as rf
+        from aiwaf.stream.redis_facade import _current_buffer
+        from aiwaf.stream import redis_facade as rf
         for i in range(rf.MAX_PENDING_IPS + 10):
             _current_buffer.append(f"ip-{i}")
         assert len(_current_buffer) == rf.MAX_PENDING_IPS
 
     def test_swap_preserves_all_data(self):
-        import redis_facade as rf
+        from aiwaf.stream import redis_facade as rf
         rf._backup_buffer.clear()
         rf._current_buffer.clear()
         for i in range(10):
@@ -552,7 +552,7 @@ class TestDeepDoubleBuffer:
         assert len(rf._current_buffer) == 10
 
     def test_swap_empties_other_buffer(self):
-        import redis_facade as rf
+        from aiwaf.stream import redis_facade as rf
         rf._backup_buffer.clear()
         rf._current_buffer.clear()
         for i in range(10):
@@ -561,7 +561,7 @@ class TestDeepDoubleBuffer:
         assert len(rf._backup_buffer) == 0
 
     def test_sync_popleft_after_swap(self):
-        import redis_facade as rf
+        from aiwaf.stream import redis_facade as rf
         rf._backup_buffer.clear()
         rf._current_buffer.clear()
         for i in range(5):
@@ -573,7 +573,7 @@ class TestDeepDoubleBuffer:
         assert len(rf._current_buffer) == 0
 
     def test_multiple_swaps_no_data_loss(self):
-        import redis_facade as rf
+        from aiwaf.stream import redis_facade as rf
         rf._backup_buffer.clear()
         rf._current_buffer.clear()
         rf._backup_buffer.append("ip1")
@@ -584,7 +584,7 @@ class TestDeepDoubleBuffer:
         assert len(rf._current_buffer) == 1
 
     def test_ip_membership_in_both_buffers(self):
-        import redis_facade as rf
+        from aiwaf.stream import redis_facade as rf
         rf._current_buffer.clear()
         rf._backup_buffer.clear()
         rf._current_buffer.append("check-ip")
@@ -593,8 +593,8 @@ class TestDeepDoubleBuffer:
         assert "other-ip" in rf._backup_buffer
 
     def test_batch_block_ips_mocked(self):
-        from redis_facade import RedisClusterStateManager
-        import redis_facade as rf
+        from aiwaf.stream.redis_facade import RedisClusterStateManager
+        from aiwaf.stream import redis_facade as rf
         mgr = MagicMock()
         mgr.batch_block_ips = AsyncMock()
         rf.redis_breaker = MagicMock()
@@ -602,7 +602,7 @@ class TestDeepDoubleBuffer:
         rf.redis_breaker.__aexit__ = AsyncMock()
 
     def test_batch_add_keywords_empty(self):
-        from redis_facade import RedisClusterStateManager
+        from aiwaf.stream.redis_facade import RedisClusterStateManager
         with patch('redis.asyncio.from_url', return_value=MockRedis()):
             import asyncio
             mgr = RedisClusterStateManager("redis://localhost")
@@ -611,7 +611,7 @@ class TestDeepDoubleBuffer:
             asyncio.run(run())
 
     def test_get_top_keywords_returns_list(self):
-        from redis_facade import RedisClusterStateManager
+        from aiwaf.stream.redis_facade import RedisClusterStateManager
         with patch('redis.asyncio.from_url', return_value=MockRedis()):
             mgr = RedisClusterStateManager("redis://localhost")
             import asyncio
@@ -626,7 +626,7 @@ class TestDeepDoubleBuffer:
 class TestExtraSETNX:
     @pytest.fixture
     def mgr(self):
-        from redis_facade import RedisClusterStateManager
+        from aiwaf.stream.redis_facade import RedisClusterStateManager
         with patch('redis.asyncio.from_url', return_value=MockRedis()):
             return RedisClusterStateManager("redis://localhost")
 
@@ -668,7 +668,7 @@ class TestExtraSETNX:
 class TestExtraPipeline:
     @pytest.fixture
     def mgr(self):
-        from redis_facade import RedisClusterStateManager
+        from aiwaf.stream.redis_facade import RedisClusterStateManager
         with patch('redis.asyncio.from_url', return_value=MockRedis()):
             return RedisClusterStateManager("redis://localhost")
 
@@ -699,38 +699,38 @@ class TestExtraPipeline:
 
 class TestExtraLocalDefense:
     def setup_method(self):
-        from redis_facade import local_blacklist, local_rate_limit
+        from aiwaf.stream.redis_facade import local_blacklist, local_rate_limit
         local_blacklist.clear()
         local_rate_limit.clear()
 
     def test_rate_limit_dict_correct_type(self):
-        from redis_facade import local_rate_limit
+        from aiwaf.stream.redis_facade import local_rate_limit
         assert hasattr(local_rate_limit, 'get')
 
     def test_blacklist_dict_correct_type(self):
-        from redis_facade import local_blacklist
+        from aiwaf.stream.redis_facade import local_blacklist
         assert hasattr(local_blacklist, 'get')
 
     def test_1000_rate_limited_ips(self):
-        from redis_facade import local_rate_limit
+        from aiwaf.stream.redis_facade import local_rate_limit
         for i in range(1000):
             local_rate_limit[f"10.0.{i//256}.{i%256}"] = 10
         assert len(local_rate_limit) == 1000
 
     def test_blacklist_string_value_is_true(self):
-        from redis_facade import local_blacklist
+        from aiwaf.stream.redis_facade import local_blacklist
         local_blacklist["ip"] = True
         assert local_blacklist["ip"] is True
 
     def test_rate_limit_counter_increments_correctly(self):
-        from redis_facade import local_rate_limit
+        from aiwaf.stream.redis_facade import local_rate_limit
         ip = "sequential"
         for i in range(100):
             local_rate_limit[ip] = i
         assert local_rate_limit[ip] == 99
 
     def test_multi_ip_block_same_time(self):
-        from redis_facade import local_blacklist
+        from aiwaf.stream.redis_facade import local_blacklist
         for ip in [f"192.168.1.{i}" for i in range(254)]:
             local_blacklist[ip] = True
         assert len(local_blacklist) == 254
@@ -738,40 +738,40 @@ class TestExtraLocalDefense:
 
 class TestExtraDoubleBuffer:
     def setup_method(self):
-        from redis_facade import _current_buffer, _backup_buffer
+        from aiwaf.stream.redis_facade import _current_buffer, _backup_buffer
         _current_buffer.clear()
         _backup_buffer.clear()
 
     def test_both_buffers_cleared(self):
-        from redis_facade import _current_buffer, _backup_buffer
+        from aiwaf.stream.redis_facade import _current_buffer, _backup_buffer
         _current_buffer.append("ip1"); _backup_buffer.append("ip2")
         _current_buffer.clear(); _backup_buffer.clear()
         assert len(_current_buffer) == 0
         assert len(_backup_buffer) == 0
 
     def test_buffer_popleft_returns_poplefted(self):
-        from redis_facade import _current_buffer
+        from aiwaf.stream.redis_facade import _current_buffer
         _current_buffer.append("ip")
         result = _current_buffer.popleft()
         assert result == "ip"
         assert len(_current_buffer) == 0
 
     def test_buffer_append_while_processing(self):
-        from redis_facade import _backup_buffer
+        from aiwaf.stream.redis_facade import _backup_buffer
         for i in range(50):
             _backup_buffer.append(f"ip-{i}")
         assert len(_backup_buffer) == 50
 
     @pytest.mark.asyncio
     async def test_batch_block_ips_many(self):
-        from redis_facade import RedisClusterStateManager
+        from aiwaf.stream.redis_facade import RedisClusterStateManager
         with patch('redis.asyncio.from_url', return_value=MockRedis()):
             mgr = RedisClusterStateManager("redis://localhost")
             await mgr.batch_block_ips([("1.1.1.1","r")]*50)
 
     @pytest.mark.asyncio
     async def test_get_top_keywords_returns_correct_type(self):
-        from redis_facade import RedisClusterStateManager
+        from aiwaf.stream.redis_facade import RedisClusterStateManager
         with patch('redis.asyncio.from_url', return_value=MockRedis()):
             mgr = RedisClusterStateManager("redis://localhost")
             result = await mgr.get_top_keywords(50)
@@ -779,7 +779,7 @@ class TestExtraDoubleBuffer:
 
     @pytest.mark.asyncio
     async def test_batch_add_keywords_exception_suppressed(self):
-        from redis_facade import RedisClusterStateManager
+        from aiwaf.stream.redis_facade import RedisClusterStateManager
         with patch('redis.asyncio.from_url', return_value=MockRedis()):
             mgr = RedisClusterStateManager("redis://localhost")
             mgr.redis.zadd = MagicMock(side_effect=OSError)
@@ -793,7 +793,7 @@ class TestExtraDoubleBuffer:
 class TestFinalRedis:
     @pytest.fixture
     def mgr(self):
-        from redis_facade import RedisClusterStateManager
+        from aiwaf.stream.redis_facade import RedisClusterStateManager
         with patch('redis.asyncio.from_url', return_value=MockRedis()):
             return RedisClusterStateManager("redis://localhost")
 
@@ -856,7 +856,7 @@ class TestFinalRedis:
 
     @pytest.mark.asyncio
     async def test_local_rate_limit_dict_per_ip(self):
-        from redis_facade import local_rate_limit
+        from aiwaf.stream.redis_facade import local_rate_limit
         for i in range(100):
             ip = f"per-ip-{i}"
             local_rate_limit[ip] = i
@@ -864,7 +864,7 @@ class TestFinalRedis:
 
     @pytest.mark.asyncio
     async def test_double_buffer_swap_in_loop(self):
-        from redis_facade import _current_buffer, _backup_buffer
+        from aiwaf.stream.redis_facade import _current_buffer, _backup_buffer
         _current_buffer.clear()
         _backup_buffer.clear()
         for cycle in range(10):
@@ -876,17 +876,17 @@ class TestFinalRedis:
         assert len(_current_buffer) == 0
 
     def test_deque_importable(self):
-        import redis_facade
+        from aiwaf.stream import redis_facade
         assert redis_facade.MAX_PENDING_IPS > 0
 
     def test_settings_default_has_redis_url(self):
-        from redis_facade import RedisClusterStateManager
+        from aiwaf.stream.redis_facade import RedisClusterStateManager
         with patch('redis.asyncio.from_url', return_value=MockRedis()):
             mgr = RedisClusterStateManager("redis://localhost")
         assert mgr.redis_url == "redis://localhost"
 
     def test_state_mgr_default_redis_url(self):
-        from redis_facade import RedisClusterStateManager
+        from aiwaf.stream.redis_facade import RedisClusterStateManager
         with patch('redis.asyncio.from_url', return_value=MockRedis()):
             mgr = RedisClusterStateManager("redis://test")
         assert mgr.redis_url == "redis://test"
@@ -898,7 +898,7 @@ class TestFinalRedis:
 class TestFinalRedis2:
     @pytest.fixture
     def mgr(self):
-        from redis_facade import RedisClusterStateManager
+        from aiwaf.stream.redis_facade import RedisClusterStateManager
         with patch('redis.asyncio.from_url', return_value=MockRedis()):
             return RedisClusterStateManager("redis://localhost")
 
@@ -919,7 +919,7 @@ class TestFinalRedis2:
         await mgr.batch_add_keywords(["k1","k2"])
 
     def test_local_defense_clean_slate(self):
-        from redis_facade import local_blacklist, local_rate_limit
+        from aiwaf.stream.redis_facade import local_blacklist, local_rate_limit
         local_blacklist.clear(); local_rate_limit.clear()
         assert len(local_blacklist) == 0
         assert len(local_rate_limit) == 0
@@ -931,11 +931,11 @@ class TestFinalRedis2:
         assert len(mgr.redis.store) == 200
 
     def test_buffer_max_capacity_check(self):
-        import redis_facade as rf
+        from aiwaf.stream import redis_facade as rf
         assert rf.MAX_PENDING_IPS > 0 and isinstance(rf.MAX_PENDING_IPS, int)
 
     def test_local_rate_limit_default_zero(self):
-        from redis_facade import local_rate_limit
+        from aiwaf.stream.redis_facade import local_rate_limit
         assert local_rate_limit.get("no-such-ip", 0) == 0
 
     @pytest.mark.asyncio
