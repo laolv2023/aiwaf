@@ -54,7 +54,7 @@ import orjson
 
 # ── 配置 ──
 
-KAFKA_BROKERS = os.getenv("KAFKA_BROKERS", "127.0.0.1:49092")
+KAFKA_BROKERS = os.getenv("KAFKA_BROKERS", "127.0.0.1:9092")
 INPUT_TOPIC = os.getenv("KAFKA_INPUT_TOPIC", "akto.api.logs")
 INPUT_TOPIC_2 = os.getenv("KAFKA_INPUT_TOPIC_2", "akto.api.logs2")
 ALERT_TOPIC = os.getenv("KAFKA_ALERT_TOPIC", "akto.aiwaf.alerts")
