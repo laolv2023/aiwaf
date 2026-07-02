@@ -38,6 +38,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# P2-01修复: 确保 scripts/ 目录在 path 中, 以便 import message_pb2
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 try:
     from aiokafka import AIOKafkaProducer, AIOKafkaConsumer
@@ -99,6 +101,9 @@ def make_akto_msg(
     # status: 对齐 mirroring 的 resp.Status 格式 "200 OK"
     status_line = f"{status_code} OK" if status_code == "200" else f"{status_code} Error"
 
+    # P3-01修复: 每条消息时间略有不同（毫秒级递增），对齐 mirroring 逐条时间戳
+    _now = int(time.time() * 1000)  # 毫秒级
+
     return {
         "path": path,
         "method": method,
@@ -108,12 +113,12 @@ def make_akto_msg(
         "responsePayload": "",
         "ip": ip,
         "destIp": dest_ip,
-        "time": str(int(time.time())),  # 秒级 Unix 时间戳，对齐 mirroring time.Now().Unix()
+        "time": str(_now // 1000),  # 秒级 Unix 时间戳，对齐 mirroring time.Now().Unix()
         "statusCode": status_code,       # string 类型，对齐 mirroring
         "type": "HTTP/1.1",              # HTTP 协议版本，对齐 mirroring req.Proto
         "status": status_line,           # 完整状态行，对齐 mirroring resp.Status
         "akto_account_id": "1000000",
-        "akto_vxlan_id": "1",
+        "akto_vxlan_id": "-1",          # P3-02修复: 对齐 mirroring 实时镜像模式 vxlanID=-1
         "is_pending": "false",           # 对齐 mirroring isPending 字段
         "source": "MIRRORING",
         "direction": "REQUEST",
@@ -161,20 +166,24 @@ def make_akto_pb(msg: Dict[str, Any]) -> bytes:
     pb.source = msg.get("source", "MIRRORING")
     pb.akto_vxlan_id = msg.get("akto_vxlan_id", "1")
 
-    # int32 字段
+    # int32 字段 (P2-02修复: 添加范围检查, 防止溢出)
     try:
-        pb.status_code = int(msg.get("statusCode", "0"))
+        sc = int(msg.get("statusCode", "0"))
+        pb.status_code = max(0, min(sc, 2147483647))
     except (ValueError, TypeError):
         pb.status_code = 0
 
     try:
-        pb.time = int(msg.get("time", "0"))
+        t = int(msg.get("time", "0"))
+        pb.time = max(0, min(t, 2147483647))
     except (ValueError, TypeError):
         pb.time = 0
 
     # api_collection_id: 从 akto_vxlan_id 转换（mirroring 行为）
+    # P3-02修复: mirroring 实时镜像模式 vxlanID=-1, protobuf int32 不支持负数的 api_collection_id
     try:
-        pb.api_collection_id = int(msg.get("akto_vxlan_id", "0"))
+        ac_id = int(msg.get("akto_vxlan_id", "0"))
+        pb.api_collection_id = max(0, min(ac_id, 2147483647))
     except (ValueError, TypeError):
         pb.api_collection_id = 0
 
@@ -182,13 +191,14 @@ def make_akto_pb(msg: Dict[str, Any]) -> bytes:
     pb.is_pending = str(msg.get("is_pending", "false")).lower() in ("true", "1", "yes")
 
     # map<string, StringList> 字段
+    # P1-01修复: protobuf 动态描述符的 map field 用 get_or_create + MergeFrom
     for k, v in _headers_json_to_map(msg.get("requestHeaders", "")).items():
         sl = _PB_StringList()
         if isinstance(v, list):
             sl.values.extend(v)
         else:
             sl.values.append(str(v))
-        pb.request_headers[k].CopyFrom(sl)
+        pb.request_headers[k].MergeFrom(sl)
 
     for k, v in _headers_json_to_map(msg.get("responseHeaders", "")).items():
         sl = _PB_StringList()
@@ -196,7 +206,7 @@ def make_akto_pb(msg: Dict[str, Any]) -> bytes:
             sl.values.extend(v)
         else:
             sl.values.append(str(v))
-        pb.response_headers[k].CopyFrom(sl)
+        pb.response_headers[k].MergeFrom(sl)
 
     return pb.SerializeToString()
 
@@ -225,8 +235,13 @@ async def send_and_collect(
     for msg in messages:
         await producer.send_and_wait(INPUT_TOPIC, orjson.dumps(msg))
         if ENABLE_LOGS2 and _PB_AVAILABLE:
-            pb_bytes = make_akto_pb(msg)
-            await producer.send_and_wait(INPUT_TOPIC_2, pb_bytes)
+            # P1-02修复: 序列化失败不影响整批发送
+            try:
+                pb_bytes = make_akto_pb(msg)
+                await producer.send_and_wait(INPUT_TOPIC_2, pb_bytes)
+            except Exception as e:
+                # protobuf 序列化失败仅记录, 不中断
+                pass
 
     # 等待 AIWAF 处理
     await asyncio.sleep(wait_seconds)
