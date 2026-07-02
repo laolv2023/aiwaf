@@ -417,8 +417,13 @@ async def run_sandbox(mode: str = "all"):
         value_deserializer=lambda v: v,
     )
 
+    # P1-01修复: consumer.start() 失败时清理已启动的 producer
     await producer.start()
-    await consumer.start()
+    try:
+        await consumer.start()
+    except Exception:
+        await producer.stop()
+        raise
 
     results: List[AttackResult] = []
 
