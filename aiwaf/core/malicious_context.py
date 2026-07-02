@@ -97,6 +97,11 @@ def is_malicious_context(
         any(attack in path_lower for attack in [
             "union+select", "drop+table", "<script", "javascript:",
             "${", "{{", "onload=", "onerror=", "file://", "http://",
+            "' or ", "' or'", "or 1=1", "or 1 = 1",
+            "';waitfor", "waitfor delay",
+            "' union", "union select",
+            "select * from", "insert into", "delete from",
+            "<img", "<svg", "<iframe",
         ]),
 
         # 4. 多次目录遍历

@@ -26,6 +26,20 @@ VERY_STRONG_ATTACK_PATTERNS = (
     "${",
     "{{",
     "eval(",
+    "' or ",
+    "' or'",
+    "or 1=1",
+    "or 1 = 1",
+    "';waitfor",
+    "waitfor delay",
+    "' union",
+    "union select",
+    "select * from",
+    "insert into",
+    "delete from",
+    "<img",
+    "<svg",
+    "<iframe",
 )
 
 PROBE_PATH_PATTERNS = (
@@ -60,6 +74,7 @@ def evaluate_keyword_policy(
     safe_prefixes: Iterable[str],
     malicious_keywords: Set[str],
     is_malicious_context: Callable[[str], bool],
+    query_strings: Sequence[str] = (),
 ) -> KeywordDecision:
     raw_path = (path or "").lower()
     normalized_path = raw_path.lstrip("/")
@@ -112,22 +127,36 @@ def evaluate_keyword_policy(
             is_suspicious = True
             block_reason = f"Inherently suspicious: {seg}"
 
+        # 修复：path_exists=True 时，如果 is_malicious_context 返回 True（含攻击 payload），
+        # 也应标记为 suspicious，使后续 very_strong 检查能拦截
+        elif (
+            path_exists
+            and seg not in legitimate_keywords
+            and is_malicious_context(seg)
+        ):
+            is_suspicious = True
+            block_reason = f"Inherently suspicious: {seg}"
+
         if not is_suspicious:
             continue
 
         if path_exists:
+            # 修复：将 query_strings 拼接到 raw_path 中，使 VERY_STRONG_ATTACK_PATTERNS 能检测到 query string 中的攻击
+            full_check_path = raw_path
+            if query_strings:
+                full_check_path = raw_path + "?" + "&".join(str(qs) for qs in query_strings)
             very_strong = [
                 sum(
                     [
-                        "../" in raw_path,
-                        "..\\" in raw_path,
+                        "../" in full_check_path,
+                        "..\\" in full_check_path,
                         any(param in query_keys for param in ["cmd", "exec", "system"]),
-                        raw_path.count("%") > 5,
+                        full_check_path.count("%") > 5,
                         len([s for s in segments if s in malicious_keywords]) > 2,
                     ]
                 )
                 >= 2,
-                any(pattern in raw_path for pattern in VERY_STRONG_ATTACK_PATTERNS),
+                any(pattern in full_check_path for pattern in VERY_STRONG_ATTACK_PATTERNS),
             ]
             if not any(very_strong):
                 continue

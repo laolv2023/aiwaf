@@ -552,7 +552,13 @@ async def run_sandbox_local(mode: str = "all"):
                     return "UUIDTamper:malformed_uuid"
 
             # 关键词检测
-            def ctx(seg, _p=uri_path, _s=status_code):
+            # 修复：将 query_strings 拼接到 path 中一起检查，使 is_malicious_context 能检测到 SQL 注入等攻击
+            query_strings = std_log.get("query_strings", [])
+            full_path = uri_path
+            if query_strings:
+                full_path = uri_path + "?" + "&".join(str(qs) for qs in query_strings)
+
+            def ctx(seg, _p=full_path, _s=status_code):
                 return is_malicious_context(_p, seg, str(_s), STATIC_KW)
 
             kw = evaluate_keyword_policy(
@@ -561,7 +567,8 @@ async def run_sandbox_local(mode: str = "all"):
                 keyword_learning_enabled=True, static_keywords=STATIC_KW,
                 dynamic_keywords=[], legitimate_keywords=DEFAULT_LEGITIMATE_KEYWORDS,
                 exempt_keywords=set(), safe_prefixes=(),
-                malicious_keywords=set(STATIC_KW), is_malicious_context=ctx)
+                malicious_keywords=set(STATIC_KW), is_malicious_context=ctx,
+                query_strings=std_log.get("query_strings", []))
             if kw.block_reason:
                 return f"KeywordBlock:{kw.block_reason[:30]}"
 
