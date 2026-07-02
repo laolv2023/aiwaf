@@ -102,8 +102,7 @@ async def main():
     settings = Settings.from_env()
     state_mgr = RedisClusterStateManager(settings.redis_cluster_url)
     engine = AIWAFStreamEngine(settings, state_mgr, '')
-    await engine.start()
-    await asyncio.Event().wait()
+    await engine.run()
 
 asyncio.run(main())
 " &

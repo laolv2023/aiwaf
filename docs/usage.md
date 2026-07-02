@@ -30,8 +30,7 @@ async def main():
         settings.blacklist_ttl,
     )
     engine = AIWAFStreamEngine(settings, state_mgr, "/path/to/model.pkl")
-    await engine.start()
-    await asyncio.Event().wait()
+    await engine.run()
 
 asyncio.run(main())
 ```

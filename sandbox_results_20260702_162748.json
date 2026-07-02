@@ -1,0 +1,69 @@
+{
+  "timestamp": "2026-07-02T08:27:48.300252+00:00",
+  "kafka_brokers": "127.0.0.1:49092",
+  "input_topic": "akto.api.logs",
+  "input_topic_2": "akto.api.logs2",
+  "logs2_enabled": true,
+  "alert_topic": "akto.aiwaf.alerts",
+  "results": [
+    {
+      "name": "brute_force",
+      "sent": 50,
+      "alerts": 0
+    },
+    {
+      "name": "credential_stuffing",
+      "sent": 40,
+      "alerts": 0
+    },
+    {
+      "name": "path_probe",
+      "sent": 12,
+      "alerts": 0
+    },
+    {
+      "name": "header_probe",
+      "sent": 1,
+      "alerts": 0
+    },
+    {
+      "name": "header_variations",
+      "sent": 5,
+      "alerts": 0
+    },
+    {
+      "name": "burst",
+      "sent": 30,
+      "alerts": 0
+    },
+    {
+      "name": "burst_mixed",
+      "sent": 40,
+      "alerts": 0
+    },
+    {
+      "name": "method_probe",
+      "sent": 3,
+      "alerts": 0
+    },
+    {
+      "name": "query_injection",
+      "sent": 3,
+      "alerts": 0
+    },
+    {
+      "name": "owasp_top10",
+      "sent": 8,
+      "alerts": 0
+    },
+    {
+      "name": "long_path",
+      "sent": 1,
+      "alerts": 0
+    }
+  ],
+  "summary": {
+    "attack_detection_rate": "0/193 (0.0%)",
+    "normal_false_positive_rate": "0/0 (0.0%)"
+  }
+}

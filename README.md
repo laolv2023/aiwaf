@@ -89,7 +89,7 @@ settings = Settings.from_env()
 state_mgr = RedisClusterStateManager(settings.redis_cluster_url)
 engine = AIWAFStreamEngine(settings, state_mgr, '/path/to/model.pkl')
 
-asyncio.run(engine.start())
+asyncio.run(engine.run())
 "
 ```
 

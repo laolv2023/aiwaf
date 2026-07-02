@@ -86,8 +86,7 @@ async def main():
         blacklist_ttl=settings.blacklist_ttl,
     )
     engine = AIWAFStreamEngine(settings, state_mgr, "/path/to/model.pkl")
-    await engine.start()
-    await asyncio.Event().wait()
+    await engine.run()
 
 asyncio.run(main())
 ```
@@ -100,7 +99,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
-CMD ["python", "-c", "import asyncio; from aiwaf.stream.config import Settings; from aiwaf.stream.redis_facade import RedisClusterStateManager; from aiwaf.stream.engine import AIWAFStreamEngine; s=Settings.from_env(); m=RedisClusterStateManager(s.redis_cluster_url, s.dedup_ttl, s.blacklist_ttl); e=AIWAFStreamEngine(s,m,'/app/model.pkl'); asyncio.run(e.start())"]
+CMD ["python", "-c", "import asyncio; from aiwaf.stream.config import Settings; from aiwaf.stream.redis_facade import RedisClusterStateManager; from aiwaf.stream.engine import AIWAFStreamEngine; s=Settings.from_env(); m=RedisClusterStateManager(s.redis_cluster_url, s.dedup_ttl, s.blacklist_ttl); e=AIWAFStreamEngine(s,m,'/app/model.pkl'); asyncio.run(e.run())"]
 ```
 
 ---

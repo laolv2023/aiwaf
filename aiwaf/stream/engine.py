@@ -38,6 +38,31 @@ METRIC_DLQ_OUT = Counter('aiwaf_dlq_out_total', 'Messages routed to DLQ')
 METRIC_POOL_FATAL = Counter('aiwaf_pool_fatal_total', 'ProcessPool broken count')
 
 
+class _LazyAIOKafkaProducer:
+    def __init__(self, settings):
+        self._settings = settings
+        self._producer = None
+
+    def _get(self):
+        if self._producer is None:
+            self._producer = AIOKafkaProducer(
+                bootstrap_servers=self._settings.kafka_brokers,
+                enable_idempotence=self._settings.kafka_enable_idempotence,
+                acks=self._settings.kafka_acks
+            )
+        return self._producer
+
+    async def start(self):
+        await self._get().start()
+
+    async def stop(self):
+        if self._producer is not None:
+            await self._producer.stop()
+
+    async def send_and_wait(self, *args, **kwargs):
+        return await self._get().send_and_wait(*args, **kwargs)
+
+
 class AIWAFStreamEngine:
     def __init__(self, settings, state_mgr: RedisClusterStateManager, model_path: str):
         self.settings = settings
@@ -132,11 +157,7 @@ class AIWAFStreamEngine:
         )
         self.batch_queue = asyncio.Queue(maxsize=settings.batch_queue_maxsize)
 
-        self.producer = AIOKafkaProducer(
-            bootstrap_servers=settings.kafka_brokers,
-            enable_idempotence=settings.kafka_enable_idempotence,
-            acks=settings.kafka_acks
-        )
+        self.producer = _LazyAIOKafkaProducer(settings)
 
         self.dynamic_keywords_cache: List[str] = []
         self._tasks: list = []
@@ -184,6 +205,14 @@ class AIWAFStreamEngine:
         ))
         self._tasks.append(asyncio.create_task(self._keyword_refresh_worker()))
         self._tasks.append(asyncio.create_task(self._consume_loop()))
+
+    async def run(self):
+        """作为服务运行，直到外部取消，并确保关闭 Kafka 连接。"""
+        await self.start()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            await self.shutdown()
 
     async def shutdown(self):
         """优雅关闭：取消后台任务、排空队列、关闭连接。"""

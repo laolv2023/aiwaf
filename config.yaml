@@ -1,0 +1,171 @@
+# AIWAF-Stream 配置文件
+#
+# 使用方式:
+#   1. 将此文件复制为 config.yaml
+#   2. 修改所需配置项
+#   3. 启动: python engine.py
+#
+# 或指定路径:
+#   AIWAF_CONFIG=/etc/aiwaf/config.yaml python engine.py
+#
+# 环境变量会覆盖 YAML 中同名字段（优先级：环境变量 > YAML > 默认值）
+
+# ── Redis ──
+redis_cluster_url: "redis://127.0.0.1:6379"
+
+# ── Kafka ──
+kafka_brokers: "127.0.0.1:49092"
+
+# Kafka Topics
+input_topic: "akto.api.logs"        # 消费 Topic（Akto 流量日志 JSON）
+alert_topic: "akto.aiwaf.alerts"     # 告警 Topic
+dlq_topic: "akto.aiwaf.dlq"          # 死信 Topic
+
+# Kafka Consumer
+consumer_group: "aiwaf-consumer-group"
+
+# ── 进程池 ──
+core_process_pool_size: 4
+
+# ── 速率限制 ──
+rate_limit_window: 60                # 窗口大小（秒）
+rate_limit_max_requests: 100         # 窗口内最大请求数
+rate_limit_flood_threshold: 150      # 洪泛检测阈值
+fail_secure_local_limit: 50          # Redis 不可用时的本地降级阈值
+
+# ── 地理围栏 ──
+geoip_db_path: ""                    # MaxMind GeoIP2 DB 路径（空=禁用）
+geo_block_countries: ""              # 阻止的国家（逗号分隔，如 "CN,RU,KP"）
+geo_allow_countries: ""              # 允许的国家（逗号分隔，空=全部允许）
+
+# ── Kafka Producer ──
+kafka_enable_idempotence: true       # 幂等生产者
+kafka_acks: "all"                    # 确认级别（all/1/0）
+
+# ── Kafka Consumer ──
+kafka_auto_offset_reset: "earliest"  # 无偏移时从最早开始
+kafka_max_poll_records: 500          # 单次拉取最大记录数
+
+# ── 进程池 ──
+max_tasks_per_child: 200             # 子进程最大任务数（防内存泄漏）
+
+# ── 微批处理 ──
+batch_max_size: 50                   # 每批最大消息数
+batch_timeout_ms: 10                 # 批处理超时（毫秒）
+batch_queue_maxsize: 10000           # 批处理队列最大长度
+
+# ── 关键词刷新 ──
+keyword_refresh_interval: 10         # 关键词缓存刷新间隔（秒）
+keyword_top_n: 500                   # 从 Redis 获取的 Top N 关键词数
+
+# ── Redis TTL ──
+dedup_ttl: 86400                     # 去重记录 TTL（秒，默认 24 小时）
+blacklist_ttl: 3600                  # IP 黑名单 TTL（秒，默认 1 小时）
+local_blacklist_ttl: 300             # 本地黑名单 TTL（秒，默认 5 分钟）
+local_rate_limit_ttl: 60             # 本地速率限制 TTL（秒）
+
+# ── 熔断器 ──
+circuit_breaker_fail_max: 5          # 连续失败多少次跳闸
+circuit_breaker_timeout: 60          # 熔断器恢复探测间隔（秒）
+
+# ── Fail-Secure 缓冲 ──
+max_pending_ips: 10000               # 待同步 IP 缓冲最大长度
+
+# ── Body 截断 ──
+max_body_hash_bytes: 10485760        # Body 哈希截断阈值（字节，默认 10MB）
+max_body_store_bytes: 1024           # Body 存储截断阈值（字节，默认 1KB）
+
+# ── 请求头验证 ──
+# 必需头（逗号分隔，空=不检查必需头）
+# 默认要求 user-agent 和 accept，内网 API 场景可设为空或自定义
+header_required: "user-agent,accept"
+# 跳过请求头检查的 IP/CIDR（逗号分隔，支持 CIDR 如 192.168.0.0/16）
+header_skip_ips: ""
+# 跳过请求头检查的路径前缀（逗号分隔）
+header_skip_paths: ""
+# User-Agent 最大长度
+header_max_ua_length: 500
+# Accept 最大长度
+header_max_accept_length: 4096
+# 自定义可疑 UA 模式（逗号分隔，空=用内置默认列表 curl,wget,python,...）
+header_suspicious_ua: ""
+# 合法爬虫 UA（逗号分隔，空=用内置默认列表 googlebot,bingbot,...）
+header_legitimate_bots: ""
+
+# ── AI 异常检测 ──
+ai_min_logs: 50                      # 最小训练样本数（不足则跳过 AI 训练）
+ai_contamination: 0.05               # IsolationForest 污染率（异常比例）
+ai_n_estimators: 100                 # IsolationForest 树数
+ai_max_samples: "auto"               # IsolationForest 最大样本数
+ai_anomaly_enabled: false           # AI 异常检测实时预测（默认关闭，需先训练模型）
+ai_anomaly_window: 300              # 历史请求窗口（秒，默认 5 分钟）
+
+# ── 蜜罐时序检测 ──
+honeypot_ttl: 300                    # 蜜罐 GET 时间戳 TTL（秒）
+
+# ── 关键词策略 ──
+keyword_min_segment_length: 3        # 路径段最小长度（短于此不参与关键词检测）
+
+# ── Redis 同步 ──
+background_sync_interval: 5          # 后台同步 Worker 间隔（秒）
+
+# ── Kafka 消费 ──
+kafka_retry_interval: 5              # 消费循环异常后重试间隔（秒）
+
+# ── 人工审核模式 ──
+# 自动拉黑 IP（False=只告警不拉黑，需人工审批）
+auto_block_enabled: true
+# 自动学习关键词（False=只告警不学习）
+auto_learn_keywords: true
+
+# 按路径禁用检测模块（JSON 字符串）
+# 示例: [{"path": "/api/webhooks/", "disable": ["header_validation", "uuid_tamper"]}]
+path_rules: ""
+
+# ── 预定义特征追加（逗号分隔，追加到默认列表，不替换）──
+# 追加到 STATIC_KW（静态恶意关键词）
+static_keywords_extra: ""
+# 追加到 DEFAULT_LEGITIMATE_KEYWORDS（合法关键词白名单）
+legitimate_keywords_extra: ""
+# 追加到 INHERENTLY_MALICIOUS_PATTERNS（固有恶意模式）
+inherently_malicious_extra: ""
+# 追加到 VERY_STRONG_ATTACK_PATTERNS（强力攻击模式）
+very_strong_attacks_extra: ""
+# 追加到 PROBE_PATH_PATTERNS（探测路径正则）
+probe_path_patterns_extra: ""
+# 追加到 OBVIOUS_POST_ONLY_SUFFIXES（POST-only 端点后缀）
+post_only_suffixes_extra: ""
+# 追加到 LOGIN_PATH_PREFIXES（登录路径前缀）
+login_paths_extra: ""
+
+# 预定义特征替换模式（false=追加到默认值，true=仅使用自定义值替换默认值）
+# 注意：替换模式下请确保包含所有需要的模式，否则可能漏检
+static_keywords_replace_mode: false
+legitimate_keywords_replace_mode: false
+inherently_malicious_replace_mode: false
+very_strong_attacks_replace_mode: false
+probe_path_patterns_replace_mode: false
+post_only_suffixes_replace_mode: false
+login_paths_replace_mode: false
+
+# ── 请求头参数（补充）──
+header_max_bytes: 32768                      # Header 最大字节数
+header_max_count: 100                        # Header 最大数量
+
+# ── UUID 篡改评分参数 ──
+uuid_block_threshold: 5                      # 拦截阈值
+uuid_malformed_weight: 5                     # malformed UUID 权重
+uuid_not_found_weight: 1                     # UUID 不存在权重
+uuid_success_decay: 2                        # 成功衰减
+uuid_window_seconds: 60                      # 评分窗口（秒）
+
+# ── 检测模式全局开关（默认全开，设为 false 可单独关闭）──
+detection_header_enabled: true               # 请求头验证
+detection_uuid_enabled: true                 # UUID 篡改检测
+detection_geo_enabled: true                  # 地理围栏
+detection_rate_limit_enabled: true           # 速率限制
+detection_keyword_enabled: true              # 关键词策略检测
+detection_fail_secure_enabled: true          # Fail-Secure 降级
+detection_method_enabled: true               # HTTP 方法验证（总开关）
+detection_method_post_only: true             # GET→POST-only 端点检测（无误报）
+detection_method_unsupported: false          # 不支持的方法检测（默认关闭，PUT/PATCH/DELETE 可能误报）

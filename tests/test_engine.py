@@ -590,6 +590,18 @@ class TestBatchAndDLQ:
         await engine.shutdown()
 
     @pytest.mark.asyncio
+    async def test_run_shutdown_on_cancel(self, engine):
+        engine.start = AsyncMock()
+        engine.shutdown = AsyncMock()
+        task = asyncio.create_task(engine.run())
+        await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        engine.start.assert_awaited_once()
+        engine.shutdown.assert_awaited_once()
+
+    @pytest.mark.asyncio
     async def test_future_exception_routes_to_dlq(self, engine):
         engine.facade = MagicMock()
         engine.facade.is_duplicate_and_add = AsyncMock(return_value=False)
@@ -1412,3 +1424,20 @@ class TestFinalEngine:
         assert isinstance(engine.settings, MockSettings)
         assert isinstance(engine.dynamic_keywords_cache, list)
         assert isinstance(engine.batch_queue, asyncio.Queue)
+
+
+def test_engine_init_defers_kafka_producer_creation_outside_async_context():
+    """构造 Engine 不应要求当前线程已有 running event loop。"""
+    with patch('aiwaf.stream.engine.ProcessPoolExecutor', MagicMock()):
+        with patch(
+            'aiwaf.stream.engine.AIOKafkaProducer',
+            side_effect=RuntimeError(
+                "The object should be created within an async function or provide loop directly."
+            ),
+        ) as producer_cls:
+            from aiwaf.stream.engine import AIWAFStreamEngine
+
+            eng = AIWAFStreamEngine(MockSettings(), MockStateMgr(), "/fake/model.pkl")
+
+    producer_cls.assert_not_called()
+    assert eng.producer is not None
