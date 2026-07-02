@@ -24,6 +24,9 @@ AIWAF-Stream 基准测试沙箱
 依赖:
     pip install aiokafka orjson
 
+    # logs2 Protobuf 双写模式（可选）:
+    pip install protobuf
+
 来源: 改造自 aiwaf-project/aiwaf examples/sandbox/attack-suite.py
 """
 import asyncio
@@ -164,7 +167,7 @@ def make_akto_pb(msg: Dict[str, Any]) -> bytes:
     pb.dest_ip = msg.get("destIp", "")
     pb.direction = msg.get("direction", "REQUEST")
     pb.source = msg.get("source", "MIRRORING")
-    pb.akto_vxlan_id = msg.get("akto_vxlan_id", "1")
+    pb.akto_vxlan_id = msg.get("akto_vxlan_id", "-1")
 
     # int32 字段 (P2-02修复: 添加范围检查, 防止溢出)
     try:
@@ -509,7 +512,6 @@ async def run_sandbox_local(mode: str = "all"):
     from aiwaf.core.header_validation import evaluate_header_policy
     from aiwaf.core.uuid_tamper import is_malformed_uuid
     from aiwaf.core.method_validation import evaluate_method_policy
-    import orjson
 
     print(f"{'=' * 70}")
     print(f"  AIWAF-Stream Sandbox — 本地模拟模式")
