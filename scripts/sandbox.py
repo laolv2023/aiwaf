@@ -408,7 +408,7 @@ async def run_sandbox(mode: str = "all"):
     print(f"  Mode:  {mode}")
     print(f"{'=' * 70}\n")
 
-    producer = AIOKafkaProducer(bootstrap_servers=KAFKA_BROKERS, value_deserializer=lambda v: v)
+    producer = AIOKafkaProducer(bootstrap_servers=KAFKA_BROKERS, value_serializer=lambda v: v)
     consumer = AIOKafkaConsumer(
         ALERT_TOPIC,
         bootstrap_servers=KAFKA_BROKERS,
