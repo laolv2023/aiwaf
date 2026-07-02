@@ -1,12 +1,21 @@
 #!/usr/bin/env python3
 """
-端到端验证脚本：从真实 Kafka 消费 akto.api.logs 消息，走完整个管道
+端到端验证脚本：从真实 Kafka 消费 Akto 消息，走完整个管道
+
+支持两种消息格式:
+    --format json   消费 akto.api.logs  (JSON 字符串)
+    --format pb     消费 akto.api.logs2 (Protobuf 二进制)
 
 使用方法:
+    # 验证 logs (JSON, 默认)
     KAFKA_BROKERS=localhost:29092 python verify_akto_logs.py
+
+    # 验证 logs2 (Protobuf)
+    KAFKA_BROKERS=localhost:29092 python verify_akto_logs.py --format pb
 
 参考文档: docs/AIWAF_Akto_Integration_Design.md §4.3
 """
+import argparse
 import asyncio
 import os
 import sys
@@ -15,14 +24,26 @@ from aiokafka import AIOKafkaConsumer
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # 项目根目录
 
-from aiwaf.stream.akto_adapter import parse_akto_json_message
+from aiwaf.stream.akto_adapter import parse_akto_json_message, parse_akto_pb_message
 from aiwaf.stream.preprocessor import transform_raw_log
 
 
-async def verify():
-    """从 akto.api.logs 消费 10 条消息，验证完整管道"""
+async def verify(fmt: str = "json"):
+    """从 Kafka 消费 10 条消息，验证完整管道
+
+    Args:
+        fmt: 消息格式 — "json" 消费 logs, "pb" 消费 logs2
+    """
     brokers = os.getenv("KAFKA_BROKERS", "localhost:29092")
-    topic = os.getenv("KAFKA_INPUT_TOPIC", "akto.api.logs")
+
+    if fmt == "pb":
+        topic = os.getenv("KAFKA_INPUT_TOPIC_2", "akto.api.logs2")
+        parser = parse_akto_pb_message
+        fmt_label = "pb"
+    else:
+        topic = os.getenv("KAFKA_INPUT_TOPIC", "akto.api.logs")
+        parser = parse_akto_json_message
+        fmt_label = "json"
 
     consumer = AIOKafkaConsumer(
         topic,
@@ -32,7 +53,7 @@ async def verify():
         value_deserializer=lambda v: v,
     )
 
-    print(f"Connecting to {brokers}, topic={topic} ...")
+    print(f"Connecting to {brokers}, topic={topic}, format={fmt_label} ...")
     await consumer.start()
     print("Connected. Waiting for messages...\n")
 
@@ -41,10 +62,15 @@ async def verify():
     fail = 0
     async for msg in consumer:
         try:
-            raw_log = parse_akto_json_message(msg.value.decode("utf-8"))
+            if fmt == "pb":
+                # Protobuf: 直接传 bytes
+                raw_log = parser(msg.value)
+            else:
+                # JSON: 先 decode 再解析
+                raw_log = parser(msg.value.decode("utf-8"))
             std_log = transform_raw_log(raw_log)
             print(
-                f"[OK] trace_id={std_log['trace_id'][:8]} "
+                f"[OK] [{fmt_label}] trace_id={std_log['trace_id'][:8]} "
                 f"ip={std_log['client_ip']} "
                 f"path={std_log['uri_path']} "
                 f"method={std_log['method']} "
@@ -52,15 +78,21 @@ async def verify():
             )
             ok += 1
         except Exception as e:
-            print(f"[FAIL] {type(e).__name__}: {str(e)[:200]}")
+            print(f"[FAIL] [{fmt_label}] {type(e).__name__}: {str(e)[:200]}")
             fail += 1
         count += 1
         if count >= 10:
             break
 
-    print(f"\nResult: {ok} ok, {fail} fail out of {count}")
+    print(f"\nResult: {ok} ok, {fail} fail out of {count} (format={fmt_label})")
     await consumer.stop()
 
 
 if __name__ == "__main__":
-    asyncio.run(verify())
+    parser = argparse.ArgumentParser(description="验证 Akto Kafka 消息解析管道")
+    parser.add_argument(
+        "--format", choices=["json", "pb"], default="json",
+        help="消息格式: json=akto.api.logs, pb=akto.api.logs2 (默认: json)",
+    )
+    args = parser.parse_args()
+    asyncio.run(verify(args.format))
