@@ -12,6 +12,7 @@ Akto Kafka 数据源适配层
 参考文档: docs/AIWAF_Akto_Integration_Design.md §3.1
 """
 import orjson
+import sys
 from urllib.parse import urlparse, parse_qs
 from typing import Dict, Any
 
@@ -130,7 +131,7 @@ def _pb_headers_to_json_str(pb_headers) -> str:
     if not pb_headers:
         return "{}"
     try:
-        import orjson
+        # P2-02修复: 顶层已 import orjson, 移除函数内重复导入
         result = {}
         for k, v in pb_headers.items():
             values = list(v.values) if v.values else []
@@ -157,6 +158,11 @@ def parse_akto_pb_message(raw_bytes: bytes) -> Dict[str, Any]:
     Raises:
         Exception: Protobuf 解析失败
     """
+    # P2-03修复: message_pb2.py 可能在 scripts/ 目录, 添加 path 查找
+    import os as _os
+    _scripts_dir = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))), "scripts")
+    if _scripts_dir not in sys.path:
+        sys.path.insert(0, _scripts_dir)
     from message_pb2 import HttpResponseParam
 
     pb = HttpResponseParam()
@@ -173,8 +179,12 @@ def parse_akto_pb_message(raw_bytes: bytes) -> Dict[str, Any]:
     api_collection_id = pb.api_collection_id
 
     # path 含完整 URI（含 query string），需用 urlparse 拆分
+    # P1-02修复: 对齐 JSON 版的纯路径/完整 URL 兼容处理
     raw_path = pb.path or "/"
-    parsed = urlparse(raw_path)
+    if "://" in raw_path:
+        parsed = urlparse(raw_path)
+    else:
+        parsed = urlparse(f"http://dummy{raw_path}")
     query_params = {k: v[0] if len(v) == 1 else v for k, v in parse_qs(parsed.query).items()}
 
     # time: int32 秒级 → float
