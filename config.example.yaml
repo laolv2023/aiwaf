@@ -17,7 +17,8 @@ redis_cluster_url: "redis://localhost:6379"
 kafka_brokers: "localhost:9092"
 
 # Kafka Topics
-input_topic: "akto.api.logs"        # 消费 Topic（Akto 流量日志 JSON）
+input_topic: "akto.api.logs"        # 消费 Topic（Akto 流量日志）
+input_format: "json"                 # 输入格式: json=akto.api.logs | pb=akto.api.logs2 | auto=自动探测
 alert_topic: "akto.aiwaf.alerts"     # 告警 Topic
 dlq_topic: "akto.aiwaf.dlq"          # 死信 Topic
 

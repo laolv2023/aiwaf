@@ -26,6 +26,7 @@ class MockSettings:
     alert_topic: str = "aiwaf_alert"
     dlq_topic: str = "aiwaf_dlq"
     input_topic: str = "akto.api.logs"
+    input_format: str = "json"
     consumer_group: str = "aiwaf-test-group"
     redis_cluster_url: str = "redis://localhost:6379"
     rate_limit_window: int = 60
@@ -1276,6 +1277,70 @@ class TestDeepEngineExtra:
     async def test_engine_start_initializes_worker(self, engine):
         engine.start()
         assert True
+
+    # ── _parse_message: input_format 配置切换测试 ──
+
+    def test_parse_message_json_mode(self, engine):
+        """input_format=json 时调用 parse_akto_json_message"""
+        engine.settings.input_format = "json"
+        msg_dict = {
+            "ip": "1.2.3.4", "method": "GET", "path": "/api/test",
+            "statusCode": "200", "time": "1700000000",
+        }
+        raw = orjson.dumps(msg_dict)
+        result = engine._parse_message(raw)
+        assert result["client_ip"] == "1.2.3.4"
+        assert result["uri_path"] == "/api/test"
+
+    def test_parse_message_pb_mode(self, engine):
+        """input_format=pb 时调用 parse_akto_pb_message"""
+        from akto_proto.threat_detection.message.http_response_param.v1 import http_response_param_pb2 as pb_mod
+        engine.settings.input_format = "pb"
+        pb = pb_mod.HttpResponseParam()
+        pb.ip = "10.0.0.1"
+        pb.method = "POST"
+        pb.path = "/api/v2/login"
+        pb.status_code = 401
+        pb.time = 1700000000
+        raw = pb.SerializeToString()
+        result = engine._parse_message(raw)
+        assert result["client_ip"] == "10.0.0.1"
+        assert result["method"] == "POST"
+        assert result["uri_path"] == "/api/v2/login"
+        assert result["status"] == 401
+
+    def test_parse_message_auto_json(self, engine):
+        """input_format=auto 时 JSON 消息走 JSON 路径"""
+        engine.settings.input_format = "auto"
+        msg_dict = {"ip": "5.6.7.8", "method": "GET", "path": "/auto/json"}
+        raw = orjson.dumps(msg_dict)
+        result = engine._parse_message(raw)
+        assert result["client_ip"] == "5.6.7.8"
+        assert result["uri_path"] == "/auto/json"
+
+    def test_parse_message_auto_pb(self, engine):
+        """input_format=auto 时 Protobuf 消息回退到 PB 路径"""
+        from akto_proto.threat_detection.message.http_response_param.v1 import http_response_param_pb2 as pb_mod
+        engine.settings.input_format = "auto"
+        pb = pb_mod.HttpResponseParam()
+        pb.ip = "10.0.0.2"
+        pb.method = "PUT"
+        pb.path = "/auto/pb"
+        pb.status_code = 200
+        raw = pb.SerializeToString()
+        result = engine._parse_message(raw)
+        assert result["client_ip"] == "10.0.0.2"
+        assert result["method"] == "PUT"
+        assert result["uri_path"] == "/auto/pb"
+
+    def test_parse_message_default_is_json(self, engine):
+        """未设置 input_format 时默认走 JSON 路径"""
+        # MockSettings 默认无 input_format 字段，getattr 回退 "json"
+        engine.settings.input_format = getattr(engine.settings, "input_format", "json")
+        msg_dict = {"ip": "9.9.9.9", "method": "GET", "path": "/default"}
+        raw = orjson.dumps(msg_dict)
+        result = engine._parse_message(raw)
+        assert result["client_ip"] == "9.9.9.9"
 
     @pytest.mark.asyncio
     async def test_engine_stop_cleanup(self, engine):

@@ -22,7 +22,7 @@ from aiwaf.stream.redis_facade import (
 # 会被 init_fail_secure() 重新赋值，因此需要通过模块引用访问
 import aiwaf.stream.redis_facade as _rf_mod
 from aiwaf.core.rate_limit import FLOOD_BLOCK
-from aiwaf.stream.akto_adapter import parse_akto_json_message
+from aiwaf.stream.akto_adapter import parse_akto_json_message, parse_akto_pb_message
 from aiwaf.stream.preprocessor import transform_raw_log, init_body_limits
 from aiwaf.core.path_manifest import PathManifest
 from aiwaf.core.header_validation import evaluate_header_policy
@@ -661,6 +661,31 @@ class AIWAFStreamEngine:
             return "HIGH"
         return "LOW"
 
+    def _parse_message(self, raw_value: bytes) -> dict:
+        """根据 input_format 配置选择解析器，将 Kafka 原始消息转为 raw_log dict
+
+        Args:
+            raw_value: Kafka 消息的原始 bytes
+
+        Returns:
+            raw_log dict，与 parse_akto_json_message / parse_akto_pb_message 输出格式一致
+
+        Raises:
+            Exception: 解析失败（由调用方捕获后路由到 DLQ）
+        """
+        fmt = self.settings.input_format
+        if fmt == "pb":
+            return parse_akto_pb_message(raw_value)
+        elif fmt == "auto":
+            # 先尝试 JSON（常见场景快速路径）
+            # PB 二进制含非 UTF-8 字节，orjson.loads 必然失败，不会误判
+            try:
+                return parse_akto_json_message(raw_value.decode('utf-8', errors='strict'))
+            except (orjson.JSONDecodeError, ValueError, UnicodeDecodeError):
+                return parse_akto_pb_message(raw_value)
+        else:  # "json" (默认)
+            return parse_akto_json_message(raw_value.decode('utf-8', errors='replace'))
+
     async def _consume_loop(self):
         """Kafka 消费循环 — 消费 akto.api.logs，适配后送入检测引擎"""
         while not self._cancel_event.is_set():
@@ -668,8 +693,8 @@ class AIWAFStreamEngine:
                 async for batch in self.consumer:
                     for msg in batch:
                         try:
-                            # JSON → raw_log dict
-                            raw_log = parse_akto_json_message(msg.value.decode('utf-8', errors='replace'))
+                            # 根据 input_format 选择解析器
+                            raw_log = self._parse_message(msg.value)
                             # raw_log → std_log (生成 trace_id, 拆分 query, 截断 body)
                             std_log = transform_raw_log(raw_log)
                             await self.process_log(std_log)

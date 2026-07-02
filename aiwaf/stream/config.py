@@ -31,7 +31,8 @@ class Settings:
     kafka_brokers: str = "localhost:9092"
 
     # Kafka Topics
-    input_topic: str = "akto.api.logs"           # 消费 Topic（Akto 流量日志 JSON）
+    input_topic: str = "akto.api.logs"           # 消费 Topic（Akto 流量日志）
+    input_format: str = "json"                    # 输入格式: json | pb | auto
     alert_topic: str = "akto.aiwaf.alerts"        # 告警 Topic
     dlq_topic: str = "akto.aiwaf.dlq"             # 死信 Topic
 
@@ -213,6 +214,7 @@ class Settings:
             "redis_cluster_url":           "REDIS_CLUSTER_URL",
             "kafka_brokers":               "KAFKA_BROKERS",
             "input_topic":                 "KAFKA_INPUT_TOPIC",
+            "input_format":                "INPUT_FORMAT",
             "alert_topic":                 "KAFKA_ALERT_TOPIC",
             "dlq_topic":                   "KAFKA_DLQ_TOPIC",
             "consumer_group":              "KAFKA_CONSUMER_GROUP",

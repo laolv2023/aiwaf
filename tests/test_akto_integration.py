@@ -416,6 +416,7 @@ class MockSettings:
     alert_topic: str = "aiwaf_alert"
     dlq_topic: str = "aiwaf_dlq"
     input_topic: str = "akto.api.logs"
+    input_format: str = "json"
     consumer_group: str = "aiwaf-test-group"
     # 完整配置项（与 config.Settings 保持一致）
     redis_cluster_url: str = "redis://localhost:6379"
