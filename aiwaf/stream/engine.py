@@ -171,7 +171,12 @@ class AIWAFStreamEngine:
             enable_auto_commit=False,
             max_poll_records=self.settings.kafka_max_poll_records,
         )
-        await self.consumer.start()
+        # P1-02修复: consumer.start() 失败时清理已启动的 producer
+        try:
+            await self.consumer.start()
+        except Exception:
+            await self.producer.stop()
+            raise
 
         self._tasks.append(asyncio.create_task(self._batch_dispatcher()))
         self._tasks.append(asyncio.create_task(
