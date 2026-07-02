@@ -51,7 +51,17 @@ import orjson
 
 KAFKA_BROKERS = os.getenv("KAFKA_BROKERS", "localhost:9092")
 INPUT_TOPIC = os.getenv("KAFKA_INPUT_TOPIC", "akto.api.logs")
+INPUT_TOPIC_2 = os.getenv("KAFKA_INPUT_TOPIC_2", "akto.api.logs2")
 ALERT_TOPIC = os.getenv("KAFKA_ALERT_TOPIC", "akto.aiwaf.alerts")
+ENABLE_LOGS2 = os.getenv("ENABLE_LOGS2", "false").lower() in ("1", "true", "yes")
+
+# ── Protobuf 消息构建（logs2）──
+# 动态构建 HttpResponseParam protobuf, 不依赖 protoc 编译
+try:
+    from message_pb2 import HttpResponseParam as _PB_HttpResponseParam, StringList as _PB_StringList
+    _PB_AVAILABLE = True
+except Exception:
+    _PB_AVAILABLE = False
 
 # ── Akto 消息构建 ──
 # 对齐 mirroring-api-logging 的 akto.api.logs Topic 输出格式
@@ -110,6 +120,87 @@ def make_akto_msg(
     }
 
 
+def _headers_json_to_map(headers_json: str) -> dict:
+    """将 JSON string 格式的 headers 转为 dict"""
+    if not headers_json:
+        return {}
+    try:
+        return orjson.loads(headers_json) if isinstance(headers_json, (str, bytes)) else headers_json
+    except Exception:
+        return {}
+
+
+def make_akto_pb(msg: Dict[str, Any]) -> bytes:
+    """将 Akto JSON 消息转为 Protobuf 二进制（logs2 格式）
+
+    字段类型转换:
+      - statusCode: string → int32
+      - time: string → int32
+      - is_pending: string → bool
+      - requestHeaders/responseHeaders: JSON string → map<StringList>
+      - api_collection_id: 从 akto_vxlan_id 转换
+
+    对齐: mirroring-api-logging/protobuf/traffic_payload/message.proto
+    """
+    if not _PB_AVAILABLE:
+        raise RuntimeError("protobuf 运行时不可用, 请安装: pip install protobuf")
+
+    pb = _PB_HttpResponseParam()
+
+    # string 字段直接赋值
+    pb.method = msg.get("method", "")
+    pb.path = msg.get("path", "")
+    pb.type = msg.get("type", "HTTP/1.1")
+    pb.request_payload = msg.get("requestPayload", "")
+    pb.status = msg.get("status", "")
+    pb.response_payload = msg.get("responsePayload", "")
+    pb.akto_account_id = msg.get("akto_account_id", "1000000")
+    pb.ip = msg.get("ip", "")
+    pb.dest_ip = msg.get("destIp", "")
+    pb.direction = msg.get("direction", "REQUEST")
+    pb.source = msg.get("source", "MIRRORING")
+    pb.akto_vxlan_id = msg.get("akto_vxlan_id", "1")
+
+    # int32 字段
+    try:
+        pb.status_code = int(msg.get("statusCode", "0"))
+    except (ValueError, TypeError):
+        pb.status_code = 0
+
+    try:
+        pb.time = int(msg.get("time", "0"))
+    except (ValueError, TypeError):
+        pb.time = 0
+
+    # api_collection_id: 从 akto_vxlan_id 转换（mirroring 行为）
+    try:
+        pb.api_collection_id = int(msg.get("akto_vxlan_id", "0"))
+    except (ValueError, TypeError):
+        pb.api_collection_id = 0
+
+    # bool 字段
+    pb.is_pending = str(msg.get("is_pending", "false")).lower() in ("true", "1", "yes")
+
+    # map<string, StringList> 字段
+    for k, v in _headers_json_to_map(msg.get("requestHeaders", "")).items():
+        sl = _PB_StringList()
+        if isinstance(v, list):
+            sl.values.extend(v)
+        else:
+            sl.values.append(str(v))
+        pb.request_headers[k].CopyFrom(sl)
+
+    for k, v in _headers_json_to_map(msg.get("responseHeaders", "")).items():
+        sl = _PB_StringList()
+        if isinstance(v, list):
+            sl.values.extend(v)
+        else:
+            sl.values.append(str(v))
+        pb.response_headers[k].CopyFrom(sl)
+
+    return pb.SerializeToString()
+
+
 # ── 攻击模式 ──
 
 @dataclass
@@ -127,12 +218,15 @@ async def send_and_collect(
     attack_name: str,
     wait_seconds: float = 2.0,
 ) -> AttackResult:
-    """发送一批消息到 Kafka，等待并收集告警"""
+    """发送一批消息到 Kafka（logs + logs2 双写），等待并收集告警"""
     sent = len(messages)
 
-    # 发送消息
+    # 发送消息: logs (JSON) + logs2 (Protobuf, 可选)
     for msg in messages:
         await producer.send_and_wait(INPUT_TOPIC, orjson.dumps(msg))
+        if ENABLE_LOGS2 and _PB_AVAILABLE:
+            pb_bytes = make_akto_pb(msg)
+            await producer.send_and_wait(INPUT_TOPIC_2, pb_bytes)
 
     # 等待 AIWAF 处理
     await asyncio.sleep(wait_seconds)
@@ -285,7 +379,13 @@ async def run_sandbox(mode: str = "all"):
     print(f"{'=' * 70}")
     print(f"  AIWAF-Stream Sandbox — 基准测试")
     print(f"  Kafka: {KAFKA_BROKERS}")
-    print(f"  Input: {INPUT_TOPIC}")
+    print(f"  Logs:  {INPUT_TOPIC}")
+    if ENABLE_LOGS2 and _PB_AVAILABLE:
+        print(f"  Logs2: {INPUT_TOPIC_2} (Protobuf 双写已启用)")
+    elif ENABLE_LOGS2 and not _PB_AVAILABLE:
+        print(f"  Logs2: ⚠️ 已启用但 protobuf 运行时不可用（pip install protobuf）")
+    else:
+        print(f"  Logs2: 未启用（设置 ENABLE_LOGS2=true 开启）")
     print(f"  Alert: {ALERT_TOPIC}")
     print(f"  Mode:  {mode}")
     print(f"{'=' * 70}\n")
@@ -343,6 +443,8 @@ async def run_sandbox(mode: str = "all"):
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "kafka_brokers": KAFKA_BROKERS,
             "input_topic": INPUT_TOPIC,
+            "input_topic_2": INPUT_TOPIC_2 if ENABLE_LOGS2 and _PB_AVAILABLE else None,
+            "logs2_enabled": ENABLE_LOGS2 and _PB_AVAILABLE,
             "alert_topic": ALERT_TOPIC,
             "results": [
                 {"name": r.name, "sent": r.messages_sent, "alerts": r.alerts_received}
