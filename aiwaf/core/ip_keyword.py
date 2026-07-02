@@ -39,8 +39,8 @@ VERY_STRONG_ATTACK_PATTERNS = (
     "cast(",                    # CAST注入
     "char(",                    # CHAR注入
     "exec(",                    # 存储过程执行
-    "sp_",                      # SQL Server存储过程
-    "xp_",                      # SQL Server扩展过程
+    "exec sp_",                 # SQL Server存储过程（精确匹配）
+    "xp_cmdshell",              # SQL Server扩展过程（精确匹配）
     "information_schema",       # 信息泄露
     "sleep(",                   # MySQL时间盲注
     "benchmark(",               # MySQL时间盲注
@@ -182,9 +182,10 @@ def evaluate_keyword_policy(
 
         if path_exists:
             # 修复：将 query_strings 拼接到 raw_path 中，使 VERY_STRONG_ATTACK_PATTERNS 能检测到 query string 中的攻击
+            # P1-01修复: query_strings 转小写, 确保大小写不敏感匹配（与独立检测层 L131-133 一致）
             full_check_path = raw_path
             if query_strings:
-                full_check_path = raw_path + "?" + "&".join(str(qs) for qs in query_strings)
+                full_check_path = raw_path + "?" + "&".join(str(qs).lower() for qs in query_strings)
             very_strong = [
                 sum(
                     [
