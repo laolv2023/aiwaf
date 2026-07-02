@@ -54,13 +54,8 @@ INPUT_TOPIC = os.getenv("KAFKA_INPUT_TOPIC", "akto.api.logs")
 ALERT_TOPIC = os.getenv("KAFKA_ALERT_TOPIC", "akto.aiwaf.alerts")
 
 # ── Akto 消息构建 ──
-
-_time_counter = int(time.time())
-
-def _next_time() -> str:
-    global _time_counter
-    _time_counter += 1
-    return str(_time_counter)
+# 对齐 mirroring-api-logging 的 akto.api.logs Topic 输出格式
+# 参考: mirroring-api-logging/main.go L579-601 (HttpResponseParam JSON 序列化)
 
 def make_akto_msg(
     path: str,
@@ -72,7 +67,15 @@ def make_akto_msg(
     request_body: str = "",
     dest_ip: str = "10.0.0.2",
 ) -> Dict[str, Any]:
-    """构建 Akto 格式的 Kafka 消息"""
+    """构建 Akto 格式的 Kafka 消息（对齐 mirroring-api-logging logs 格式）
+
+    对齐项:
+      - time: 秒级 Unix 时间戳（mirroring 用 time.Now().Unix()）
+      - type: HTTP 协议版本（mirroring 用 req.Proto，如 "HTTP/1.1"）
+      - status: 完整状态行（mirroring 用 resp.Status，如 "200 OK"）
+      - is_pending: 是否待处理（mirroring 的 isPending 字段）
+      - statusCode: string 类型（mirroring 所有字段均为 string）
+    """
     headers = {
         "user-agent": user_agent,
         "accept": accept,
@@ -83,6 +86,9 @@ def make_akto_msg(
         headers["content-type"] = "application/json"
         headers["content-length"] = str(len(request_body))
 
+    # status: 对齐 mirroring 的 resp.Status 格式 "200 OK"
+    status_line = f"{status_code} OK" if status_code == "200" else f"{status_code} Error"
+
     return {
         "path": path,
         "method": method,
@@ -92,11 +98,13 @@ def make_akto_msg(
         "responsePayload": "",
         "ip": ip,
         "destIp": dest_ip,
-        "time": _next_time(),
-        "statusCode": status_code,
-        "status": "OK" if status_code == "200" else "Error",
+        "time": str(int(time.time())),  # 秒级 Unix 时间戳，对齐 mirroring time.Now().Unix()
+        "statusCode": status_code,       # string 类型，对齐 mirroring
+        "type": "HTTP/1.1",              # HTTP 协议版本，对齐 mirroring req.Proto
+        "status": status_line,           # 完整状态行，对齐 mirroring resp.Status
         "akto_account_id": "1000000",
         "akto_vxlan_id": "1",
+        "is_pending": "false",           # 对齐 mirroring isPending 字段
         "source": "MIRRORING",
         "direction": "REQUEST",
     }
