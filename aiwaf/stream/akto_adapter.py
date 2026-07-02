@@ -120,3 +120,86 @@ def parse_akto_json_message(raw_json: str) -> Dict[str, Any]:
         "api_collection_id": api_collection_id,  # 原生 Collection ID（int32，透传至 latest_api_collection_id）
         "host": host,                            # 请求 Host（透传至 MaliciousEventMessage.host）
     }
+
+
+def _pb_headers_to_json_str(pb_headers) -> str:
+    """将 protobuf map<string, StringList> 转为 JSON string
+
+    对齐 parse_akto_json_message 的输出格式：requestHeaders/responseHeaders 为 JSON string
+    """
+    if not pb_headers:
+        return "{}"
+    try:
+        import orjson
+        result = {}
+        for k, v in pb_headers.items():
+            values = list(v.values) if v.values else []
+            if len(values) == 1:
+                result[k] = values[0]
+            else:
+                result[k] = values
+        return orjson.dumps(result).decode()
+    except Exception:
+        return "{}"
+
+
+def parse_akto_pb_message(raw_bytes: bytes) -> Dict[str, Any]:
+    """将 akto.api.logs2 的 Protobuf 消息转为 transform_raw_log 期望的格式
+
+    与 parse_akto_json_message 输出格式完全一致，仅输入不同（Protobuf vs JSON）
+
+    Args:
+        raw_bytes: Protobuf 序列化的 HttpResponseParam 二进制数据
+
+    Returns:
+        raw_log dict，与 parse_akto_json_message 返回值结构相同
+
+    Raises:
+        Exception: Protobuf 解析失败
+    """
+    from message_pb2 import HttpResponseParam
+
+    pb = HttpResponseParam()
+    pb.ParseFromString(raw_bytes)
+
+    # 从 protobuf map 中提取 host
+    host = ""
+    for k, v in pb.request_headers.items():
+        if k.lower() == "host" and v.values:
+            host = v.values[0]
+            break
+
+    # api_collection_id: int32 → int
+    api_collection_id = pb.api_collection_id
+
+    # path 含完整 URI（含 query string），需用 urlparse 拆分
+    raw_path = pb.path or "/"
+    parsed = urlparse(raw_path)
+    query_params = {k: v[0] if len(v) == 1 else v for k, v in parse_qs(parsed.query).items()}
+
+    # time: int32 秒级 → float
+    timestamp = float(pb.time) if pb.time else 0.0
+
+    # statusCode: int32 → int
+    status_int = pb.status_code if pb.status_code else 200
+
+    return {
+        "client_ip": pb.ip or "unknown",
+        "timestamp": timestamp,
+        "method": pb.method or "GET",
+        "uri_path": parsed.path or "/",
+        "query_params": query_params,
+        "status": status_int,
+        "request_body": pb.request_payload or "",
+        "akto_account_id": pb.akto_account_id or "",
+        "akto_vxlan_id": pb.akto_vxlan_id or "",
+        "source": pb.source or "",
+        "direction": pb.direction or "",
+        "dest_ip": pb.dest_ip or "",
+        "response_payload": pb.response_payload or "",
+        "request_headers": _pb_headers_to_json_str(pb.request_headers),
+        "response_headers": _pb_headers_to_json_str(pb.response_headers),
+        "request_uuid": "",
+        "api_collection_id": api_collection_id,
+        "host": host,
+    }
