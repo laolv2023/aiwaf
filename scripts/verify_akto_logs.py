@@ -37,6 +37,13 @@ async def verify(fmt: str = "json"):
     brokers = os.getenv("KAFKA_BROKERS", "localhost:29092")
 
     if fmt == "pb":
+        # P2-01修复: 提前检查 protobuf 运行时是否可用
+        try:
+            from message_pb2 import HttpResponseParam  # noqa: F401
+        except Exception:
+            print("ERROR: protobuf 运行时不可用, 请安装: pip install protobuf")
+            print("       并确保 message_pb2.py 在 scripts/ 目录或 PYTHONPATH 中")
+            return
         topic = os.getenv("KAFKA_INPUT_TOPIC_2", "akto.api.logs2")
         parser = parse_akto_pb_message
         fmt_label = "pb"
@@ -60,32 +67,33 @@ async def verify(fmt: str = "json"):
     count = 0
     ok = 0
     fail = 0
-    async for msg in consumer:
-        try:
-            if fmt == "pb":
-                # Protobuf: 直接传 bytes
-                raw_log = parser(msg.value)
-            else:
-                # JSON: 先 decode 再解析
-                raw_log = parser(msg.value.decode("utf-8"))
-            std_log = transform_raw_log(raw_log)
-            print(
-                f"[OK] [{fmt_label}] trace_id={std_log['trace_id'][:8]} "
-                f"ip={std_log['client_ip']} "
-                f"path={std_log['uri_path']} "
-                f"method={std_log['method']} "
-                f"status={std_log['status_code']}"
-            )
-            ok += 1
-        except Exception as e:
-            print(f"[FAIL] [{fmt_label}] {type(e).__name__}: {str(e)[:200]}")
-            fail += 1
-        count += 1
-        if count >= 10:
-            break
-
-    print(f"\nResult: {ok} ok, {fail} fail out of {count} (format={fmt_label})")
-    await consumer.stop()
+    try:
+        async for msg in consumer:
+            try:
+                if fmt == "pb":
+                    # Protobuf: 直接传 bytes
+                    raw_log = parser(msg.value)
+                else:
+                    # JSON: 先 decode 再解析
+                    raw_log = parser(msg.value.decode("utf-8"))
+                std_log = transform_raw_log(raw_log)
+                print(
+                    f"[OK] [{fmt_label}] trace_id={std_log['trace_id'][:8]} "
+                    f"ip={std_log['client_ip']} "
+                    f"path={std_log['uri_path']} "
+                    f"method={std_log['method']} "
+                    f"status={std_log['status_code']}"
+                )
+                ok += 1
+            except Exception as e:
+                print(f"[FAIL] [{fmt_label}] {type(e).__name__}: {str(e)[:200]}")
+                fail += 1
+            count += 1
+            if count >= 10:
+                break
+    finally:
+        print(f"\nResult: {ok} ok, {fail} fail out of {count} (format={fmt_label})")
+        await consumer.stop()
 
 
 if __name__ == "__main__":
