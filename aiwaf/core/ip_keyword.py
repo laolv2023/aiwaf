@@ -17,29 +17,55 @@ INHERENTLY_MALICIOUS_PATTERNS = (
 )
 
 VERY_STRONG_ATTACK_PATTERNS = (
+    # ── SQL注入 ──
     "union+select",
+    "union select",
+    "union/**/select",          # 注释绕过
+    "' union",
+    "select * from",
+    "insert into",
+    "delete from",
     "drop+table",
-    "<script",
-    "javascript:",
-    "onload=",
-    "onerror=",
-    "${",
-    "{{",
-    "eval(",
+    "drop table",
     "' or ",
     "' or'",
     "or 1=1",
     "or 1 = 1",
     "';waitfor",
     "waitfor delay",
-    "' union",
-    "union select",
-    "select * from",
-    "insert into",
-    "delete from",
+    # SQL注入变体
+    "unhex(hex(",               # 编码绕过
+    "convert(int",              # 类型转换注入
+    "cast(",                    # CAST注入
+    "char(",                    # CHAR注入
+    "exec(",                    # 存储过程执行
+    "sp_",                      # SQL Server存储过程
+    "xp_",                      # SQL Server扩展过程
+    "information_schema",       # 信息泄露
+    "sleep(",                   # MySQL时间盲注
+    "benchmark(",               # MySQL时间盲注
+    "pg_sleep(",                # PostgreSQL时间盲注
+    # ── XSS ──
+    "<script",
+    "javascript:",
+    "onload=",
+    "onerror=",
     "<img",
     "<svg",
     "<iframe",
+    "document.cookie",          # Cookie窃取
+    "window.location",          # 重定向
+    "fromcharcode",             # 编码绕过
+    # ── 模板注入 ──
+    "${",
+    "{{",
+    "eval(",
+    # ── 命令注入 ──
+    ";cat ",                    # 命令拼接
+    "|cat ",                    # 管道命令
+    "/etc/passwd",              # 路径遍历
+    "system(",                  # PHP命令执行
+    "passthru(",                # PHP命令执行
 )
 
 PROBE_PATH_PATTERNS = (
@@ -98,6 +124,20 @@ def evaluate_keyword_policy(
                     learned_keywords=learned_keywords,
                     segments=segments,
                 )
+
+    # 建议1: VERY_STRONG_ATTACK_PATTERNS 独立检测层
+    # 对 full_path（含 query string）做全量扫描，不依赖 path_exists 或 suspicious_kw 前置条件
+    # raw_path 已转小写, query_strings 也需转小写以确保大小写不敏感匹配
+    full_path = raw_path
+    if query_strings:
+        full_path = raw_path + "?" + "&".join(str(qs).lower() for qs in query_strings)
+    for pattern in VERY_STRONG_ATTACK_PATTERNS:
+        if pattern in full_path:
+            return KeywordDecision(
+                block_reason=f"Keyword block: Very strong attack pattern: {pattern}",
+                learned_keywords=learned_keywords,
+                segments=segments,
+            )
 
     all_kw = set(static_keywords) | set(dynamic_keywords)
     suspicious_kw = set()
